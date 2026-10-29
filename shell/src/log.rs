@@ -1,4 +1,4 @@
-//! A small daily log in `%LOCALAPPDATA%\FileeLite\logs\filee-lite-YYYYMMDD.log`, like upstream's.
+//! A small daily log in `%LOCALAPPDATA%\FileeLite\logs\filee-rust-YYYYMMDD.log`, like upstream's.
 //! Use the `info!` / `warn!` / `error!` macros (`crate::info!(...)`).
 
 use std::fs::OpenOptions;
@@ -14,7 +14,7 @@ pub fn write(level: &str, module: &str, message: &str) {
     let t = unsafe { GetLocalTime() };
     let dir = crate::paths::lite_dir().join("logs");
     let _ = std::fs::create_dir_all(&dir);
-    let file = dir.join(format!("filee-lite-{:04}{:02}{:02}.log", t.wYear, t.wMonth, t.wDay));
+    let file = dir.join(format!("filee-rust-{:04}{:02}{:02}.log", t.wYear, t.wMonth, t.wDay));
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(file) {
         let _ = writeln!(
             f,

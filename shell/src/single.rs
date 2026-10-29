@@ -1,4 +1,4 @@
-//! One Filee Lite per user session: a named mutex; later launches send their arguments to the running one's
+//! One Filee Rust per user session: a named mutex; later launches send their arguments to the running one's
 //! main window with `WM_COPYDATA` (UTF-16, NUL-separated) and exit.
 
 use windows::core::{HSTRING, PCWSTR};
@@ -25,7 +25,7 @@ pub fn acquire() -> Instance {
     }
 }
 
-/// Sends `args` to the running Filee Lite. False when it isn't there or doesn't answer within 5 s.
+/// Sends `args` to the running Filee Rust. False when it isn't there or doesn't answer within 5 s.
 pub fn forward(args: &[String]) -> bool {
     let mut data: Vec<u16> = Vec::new();
     for a in args {

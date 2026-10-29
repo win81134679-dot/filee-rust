@@ -232,7 +232,7 @@ mod tests {
     fn none() -> HashSet<String> {
         HashSet::new()
     }
-    const OWN: [&str; 2] = ["Filee", "filee-lite"];
+    const OWN: [&str; 3] = ["Filee", "filee-rust", "filee-lite"]; // filee-lite: the name before 2026-10-29
 
     #[test]
     fn explorer_classes_and_other_file_managers_are_file_managers() {
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn own_windows_are_excluded_even_over_anywhere() {
         let ex = none();
-        assert!(!allows(Kind::Drag, Scope::Anywhere, &facts("DonutWnd", "filee-lite"), &OWN, &ex));
+        assert!(!allows(Kind::Drag, Scope::Anywhere, &facts("DonutWnd", "filee-rust"), &OWN, &ex));
         assert!(!allows(Kind::Drag, Scope::Anywhere, &facts("Avalonia", "Filee"), &OWN, &ex));
         assert!(!allows(Kind::Drag, Scope::Anywhere, &facts("Avalonia", "FILEE"), &OWN, &ex));
     }

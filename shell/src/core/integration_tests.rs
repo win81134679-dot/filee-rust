@@ -430,7 +430,7 @@ fn first_run_without_library_files_still_fills_the_donut() {
 fn pdf_donut_has_the_office_group_and_it_converts() {
     let _lock = integration_lock();
     let (_p, _q) = (Restore::of(DataFile::Presets), Restore::of(DataFile::Profiles));
-    let marker = isolated_data_dir().join("filee-lite-policy.json");
+    let marker = isolated_data_dir().join("filee-rust-policy.json");
     let _ = std::fs::remove_file(&marker);
     load_store();
     integration::apply_pdf_office_once();

@@ -204,7 +204,7 @@ pub fn find_preset(id: &str) -> Option<Value> {
         .cloned()
 }
 
-/// Tray "pause": the one settings field Filee Lite owns.
+/// Tray "pause": the one settings field Filee Rust owns.
 pub fn set_paused(paused: bool) {
     mutate(
         DataFile::Settings,

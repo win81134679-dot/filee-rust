@@ -15,7 +15,7 @@ What it does for a new tag:
      "patched files" (patches/hosted.patch touches them: conflicts show up here) and "follows by itself"
      (engines, tools, translations: they come with the rebuilt upstream, nothing to port)
   3. take hosted.patch off, check out the new tag, put the patch back on (3-way; a conflict stops here)
-  4. 工具/build_release.py → dist/FileeLite-<new>-lite.<LITE_REV>-Setup.exe
+  4. 工具/build_release.py → dist/FileeRust-<new>-rust.<LITE_REV>-Setup.exe
 Exit codes: 0 done (nothing for a person to look at), 2 built but the report lists shell changes to port,
 1 failed (message says where), 10 (--check) a newer release exists.
 State: cache/update-state.json (last check date, last built tag) so the GitHub API is asked once a day at most.
@@ -101,7 +101,7 @@ def version_key(tag: str) -> tuple:
 
 def latest_release() -> str:
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
-                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "filee-lite-update"})
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "filee-rust-update"})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)["tag_name"]
 

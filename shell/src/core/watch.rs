@@ -597,7 +597,7 @@ impl NameFilter {
             f.globs.push(p.to_lowercase().chars().collect());
         }
         if f.unsupported > 0 {
-            warn!("{} watch-folder pattern(s) are regular expressions, which Filee Lite does not evaluate", f.unsupported);
+            warn!("{} watch-folder pattern(s) are regular expressions, which Filee Rust does not evaluate", f.unsupported);
         }
         f
     }

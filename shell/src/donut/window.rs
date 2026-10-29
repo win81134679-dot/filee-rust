@@ -90,7 +90,7 @@ pub fn init() {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             CLASS,
-            w!("Filee Lite donut"),
+            w!("Filee Rust donut"),
             WS_POPUP,
             0,
             0,

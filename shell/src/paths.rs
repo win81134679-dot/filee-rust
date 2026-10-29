@@ -1,11 +1,11 @@
-//! Where things are. Installed layout (see packaging/FileeLite.iss):
+//! Where things are. Installed layout (see packaging/FileeRust.iss):
 //!
 //! ```text
-//! <install>\filee-lite.exe
+//! <install>\filee-rust.exe
 //! <install>\app\Filee.exe, filee-cli.exe, …   upstream Filee (official portable + patched Filee.dll)
 //! <install>\i18n\<lang>.json                  upstream's translations (copied from src/Filee.App/Assets/i18n)
 //! ```
-//! Data is upstream's: `%APPDATA%\Filee` (or `FILEE_DATA_DIR`, as upstream). Filee Lite's own files (log, caches)
+//! Data is upstream's: `%APPDATA%\Filee` (or `FILEE_DATA_DIR`, as upstream). Filee Rust's own files (log, caches)
 //! are in `%LOCALAPPDATA%\FileeLite`.
 
 use std::path::{Path, PathBuf};
@@ -61,7 +61,7 @@ pub fn data_dir() -> &'static Path {
     })
 }
 
-/// Filee Lite's own folder (logs, the formats cache).
+/// Filee Rust's own folder (logs, the formats cache).
 pub fn lite_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -72,7 +72,7 @@ pub fn lite_dir() -> &'static Path {
     })
 }
 
-/// Upstream's translations shipped next to filee-lite.exe (`i18n\zh-TW.json` …).
+/// Upstream's translations shipped next to filee-rust.exe (`i18n\zh-TW.json` …).
 pub fn i18n_dir() -> PathBuf {
     let beside = exe_dir().join("i18n");
     if beside.exists() {

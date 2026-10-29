@@ -1,0 +1,29 @@
+// The exe's icon (Explorer, the Explorer verb's Icon=filee-rust.exe). Upstream's filee.ico, MIT.
+1 ICON "filee.ico"
+
+// Version information: Task Manager, the startup list and file properties show FileDescription as the name.
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Filee Rust contributors"
+      VALUE "FileDescription", "Filee Rust"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "InternalName", "filee-rust"
+      VALUE "LegalCopyright", "MIT License"
+      VALUE "OriginalFilename", "filee-rust.exe"
+      VALUE "ProductName", "Filee Rust"
+      VALUE "ProductVersion", "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

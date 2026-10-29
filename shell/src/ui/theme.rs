@@ -241,7 +241,7 @@ fn apply_overrides(s: &mut Scheme, custom: &Value, dark: bool) {
             "textsecondary" => s.text_muted = color,
             "danger" => s.danger = color,
             "success" => s.success = color,
-            _ => {} // page and warning are not drawn by Filee Lite
+            _ => {} // page and warning are not drawn by Filee Rust
         }
     }
 }

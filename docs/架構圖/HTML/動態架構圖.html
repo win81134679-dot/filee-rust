@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Filee Lite 動態架構圖</title>
+  <title>Filee Rust 動態架構圖</title>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -178,8 +178,8 @@
 
     <div class="diagram-container">
       <svg viewBox="0 140 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-motion-arch-title lite-motion-arch-desc">
-        <title id="lite-motion-arch-title">Filee Lite 執行架構</title>
-        <desc id="lite-motion-arch-desc">常駐的 filee-lite.exe 接住 Ctrl 拖曳、顯示環形選單；一般轉檔交給轉完就結束的上游 filee-cli，設定與互動工具臨時開上游 Filee.exe 的 hosted 模式，三者共用 %APPDATA%\Filee 的設定檔與同一組轉換引擎。</desc>
+        <title id="lite-motion-arch-title">Filee Rust 執行架構</title>
+        <desc id="lite-motion-arch-desc">常駐的 filee-rust.exe 接住 Ctrl 拖曳、顯示環形選單；一般轉檔交給轉完就結束的上游 filee-cli，設定與互動工具臨時開上游 Filee.exe 的 hosted 模式，三者共用 %APPDATA%\Filee 的設定檔與同一組轉換引擎。</desc>
         <defs>
           <marker id="lite-motion-arch-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>
           <marker id="lite-motion-arch-proc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3949ab"/></marker>
@@ -192,7 +192,7 @@
 
         <!-- 區塊（一直在） -->
         <rect x="296" y="160" width="536" height="384" rx="8" fill="#14213d" fill-opacity="0.02" stroke="#14213d" stroke-opacity="0.10" stroke-width="0.8"/>
-        <text x="312" y="184" class="t-zone" fill="#56627c">filee-lite.exe · 一直開著（Rust）</text>
+        <text x="312" y="184" class="t-zone" fill="#56627c">filee-rust.exe · 一直開著（Rust）</text>
         <text x="816" y="184" class="t-mono" fill="#56627c" text-anchor="end">閒置目標 &lt; 30 MB（待實測）</text>
         <rect x="872" y="160" width="360" height="384" rx="8" fill="#14213d" fill-opacity="0.02" stroke="#14213d" stroke-opacity="0.10" stroke-width="0.8" stroke-dasharray="5,4"/>
         <text x="888" y="184" class="t-zone" fill="#56627c">上游 Filee · 要用才開，做完自己結束</text>

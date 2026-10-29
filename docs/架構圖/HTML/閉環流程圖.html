@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Filee Lite 閉環流程圖</title>
+  <title>Filee Rust 閉環流程圖</title>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,7 +25,7 @@
 <body>
 <div class="diagram-container">
 <svg viewBox="0 0 1280 904" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-loop-title lite-loop-desc">
-<title id="lite-loop-title">Filee Lite 閉環流程圖</title>
+<title id="lite-loop-title">Filee Rust 閉環流程圖</title>
 <desc id="lite-loop-desc">上游 Filee 出新版時，update.py 查到新 tag、寫差異報告、換上補丁、重編上游、以官方 Portable 為底組裝並編 Rust 外殼、自我檢查後產出安裝檔；補丁衝突時停下由人修，報告列出外殼要跟的改動時由人移植 shell 後重建。</desc>
 <defs>
 <marker id="lite-loop-arr-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>
@@ -38,7 +38,7 @@
 
 <!-- 背景與標題 -->
 <rect width="100%" height="100%" fill="#f4f7fb"/>
-<text x="40" y="56" class="t-eyebrow" fill="#44506b">流程圖 · Filee Lite 的閉環（python 工具/update.py）</text>
+<text x="40" y="56" class="t-eyebrow" fill="#44506b">流程圖 · Filee Rust 的閉環（python 工具/update.py）</text>
 <text x="40" y="112" class="t-title" fill="#14213d">上游出新版，一條指令走到新的安裝檔</text>
 
 <!-- 連線（在節點之前） -->

@@ -1,7 +1,7 @@
 # filee-rust
 
 **Filee 的 Rust 常駐版**：按住 Ctrl 拖檔案就跳出環形選單轉檔，功能跟原版一樣，常駐記憶體從約 300 MB 降到十幾 MB 的目標。
-安裝後的程式名稱是 **Filee Lite**（Lite 指的是記憶體，不是功能）。
+安裝後的程式名稱是 **Filee Rust**（2026-10-29 以前叫 Filee Lite；舊版可以直接用新的安裝檔原地升級，設定不會丟）。
 
 [Filee](https://github.com/KnifeLemon/Filee) 是很好用的離線轉檔工具：在檔案總管按住 Ctrl 拖檔案，跳出環形選單，放下就轉好
 （圖片、PDF、Office、影音、電子書、CAD… 263 種格式）。它用 C#／Avalonia 寫成，一直開著就要
@@ -9,7 +9,7 @@
 
 這個專案把「一直開著」的那一層用 Rust 重寫，轉檔與互動視窗仍交給上游 Filee，用完就結束：
 
-- 常駐的 `filee-lite.exe` 只負責等手勢、畫環形選單、顯示進度、系統匣、自動轉換資料夾。
+- 常駐的 `filee-rust.exe` 只負責等手勢、畫環形選單、顯示進度、系統匣、自動轉換資料夾。
 - 真正轉檔時才叫上游的 `filee-cli.exe`，轉完就結束（PNG→WebP 實測 0.53 秒、峰值 89 MB，結束即釋放）。
 - 設定頁、裁切、剪輯、PDF 頁面編輯、列印工作室這些視窗，要用時才臨時開上游的 Filee，關掉就結束。
 - 設定、預設、轉換紀錄跟上游**共用同一份**（`%APPDATA%\Filee`），從原版換過來什麼都不用重設。
@@ -40,7 +40,7 @@
 
 | 程式 | 什麼時候在跑 | 負責 |
 |---|---|---|
-| `filee-lite.exe`（Rust） | 一直開著 | 全域滑鼠鍵盤 hook、手勢判斷、環形選單、進度通知、系統匣、右鍵選單、自動轉換資料夾、轉換紀錄、300 DPI 政策、每週引擎更新 |
+| `filee-rust.exe`（Rust） | 一直開著 | 全域滑鼠鍵盤 hook、手勢判斷、環形選單、進度通知、系統匣、右鍵選單、自動轉換資料夾、轉換紀錄、300 DPI 政策、每週引擎更新 |
 | `app\filee-cli.exe`（上游） | 每次轉檔一個，轉完結束 | 實際轉檔（`convert --preset <id> --json`）、可轉格式表（`formats`） |
 | `app\Filee.exe --hosted`（上游＋補丁） | 要開視窗時才開，關掉就結束 | 設定視窗、互動工具（裁切、剪輯、頁面編輯、列印工作室）、合併順序、每次詢問存檔位置 |
 
@@ -94,11 +94,11 @@ flowchart LR
 
 ## 安裝
 
-這個 repo 不提供編好的安裝檔，請照〈[從原始碼建置](#從原始碼建置)〉產生 `dist\FileeLite-<版本>-Setup.exe`，
+這個 repo 不提供編好的安裝檔，請照〈[從原始碼建置](#從原始碼建置)〉產生 `dist\FileeRust-<版本>-Setup.exe`，
 再帶到任何一台 Windows 10（1809 以後）／11 x64 安裝。
 
 1. 執行安裝檔。安裝檔沒有簽章，Windows 會跳 SmartScreen：按「其他資訊」→「仍要執行」。
-2. 預設裝給目前使用者（`%LOCALAPPDATA%\Programs\Filee Lite`，不需要系統管理員），也可以選裝給所有使用者。
+2. 預設裝給目前使用者（`%LOCALAPPDATA%\Programs\Filee Rust`，不需要系統管理員），也可以選裝給所有使用者。
    安裝選項**全部預設勾選**：
    - 登入 Windows 時自動啟動
    - 7-Zip 解壓縮引擎：ZIP、7Z、RAR、TAR、ISO 光碟映像。放在安裝檔裡，不用下載。
@@ -113,7 +113,7 @@ flowchart LR
 
    圖片、資料（CSV、JSON、XML…）、2D 製圖（DXF、DWG）、PDF、向量、3D 模型的轉換都是內建的，不用另外裝。
 3. 電腦上有原版 Filee 的話，安裝程式會請它先結束。建議之後到「設定 → 應用程式」解除安裝原版，兩個同時開會跳兩個選單。
-4. 防毒軟體把 `filee-lite.exe` 擋下或刪掉的話，把安裝資料夾加入信任。它會偵測全域滑鼠鍵盤（只聽不攔），
+4. 防毒軟體把 `filee-rust.exe` 擋下或刪掉的話，把安裝資料夾加入信任。它會偵測全域滑鼠鍵盤（只聽不攔），
    沒簽章的程式這樣做容易被誤判。
 
 第一次啟動時，如果這台電腦從沒用過原版 Filee，外殼會請上游寫出它的預設選單，所以一裝好就有完整的選單。
@@ -126,19 +126,19 @@ flowchart LR
 | 轉選取的檔 | 選好檔案按 **Ctrl+Alt+Space** → 點格式，或用方向鍵＋Enter，Esc 關閉 |
 | 右鍵 | 檔案上按右鍵 → 「用 Filee 轉換」 |
 | 翻到背面（更多格式） | 選單開著時按 **Tab** 或滾輪 |
-| 設定 | 點系統匣的 Filee 圖示（開上游的設定視窗）；開始功能表的「Filee Lite」也是 |
+| 設定 | 點系統匣的 Filee 圖示（開上游的設定視窗）；開始功能表的「Filee Rust」也是 |
 | 暫停／結束 | 系統匣右鍵 |
 
 指令列：
 
 ```text
-filee-lite.exe                     常駐（系統匣）；已經在跑時再啟動一次會開設定
-filee-lite.exe --background        常駐，不開任何視窗（登入時用）
-filee-lite.exe --convert a b …     對這些檔案開環形選單（右鍵選單用；轉交給正在跑的那一個）
-filee-lite.exe --convert-list f    同上，路徑一行一個（UTF-8 檔）
-filee-lite.exe --settings          開上游的設定視窗
-filee-lite.exe --quit              請正在跑的那一個結束
-filee-lite.exe --selftest          檢查安裝（app 資料夾、CLI、翻譯、資料夾），印出報告後結束
+filee-rust.exe                     常駐（系統匣）；已經在跑時再啟動一次會開設定
+filee-rust.exe --background        常駐，不開任何視窗（登入時用）
+filee-rust.exe --convert a b …     對這些檔案開環形選單（右鍵選單用；轉交給正在跑的那一個）
+filee-rust.exe --convert-list f    同上，路徑一行一個（UTF-8 檔）
+filee-rust.exe --settings          開上游的設定視窗
+filee-rust.exe --quit              請正在跑的那一個結束
+filee-rust.exe --selftest          檢查安裝（app 資料夾、CLI、翻譯、資料夾），印出報告後結束
 ```
 
 ## 轉換引擎
@@ -155,7 +155,7 @@ filee-lite.exe --selftest          檢查安裝（app 資料夾、CLI、翻譯�
 
 **PDF 轉 Excel** 只抓 PDF 裡**畫了格線的表格**（上游的規則）；沒有表格或掃描成圖片的 PDF 會失敗並說明原因。
 
-**每週自動更新**：Filee Lite 常駐時一週檢查一次，在背景（不開視窗、較低優先權、沒在轉檔、沒用電池時）更新：
+**每週自動更新**：Filee Rust 常駐時一週檢查一次，在背景（不開視窗、較低優先權、沒在轉檔、沒用電池時）更新：
 
 - Filee 自己下載的引擎（`%LOCALAPPDATA%\Filee\engines`）
 - 內建的 7-Zip
@@ -163,7 +163,7 @@ filee-lite.exe --selftest          檢查安裝（app 資料夾、CLI、翻譯�
 版本與 SHA-256 以 Filee 最新版公布的引擎清單為準；下載網址必須跟原本是同一家發行者（同一個主機，GitHub 同一個
 repo、conda 同一個 channel），而且版本要比較新，否則不採用。失敗的隔天重試。
 
-- 用 winget 或安裝程式自己裝在系統上的 LibreOffice 等軟體，由它們各自的更新機制負責，Filee Lite 不會去動。
+- 用 winget 或安裝程式自己裝在系統上的 LibreOffice 等軟體，由它們各自的更新機制負責，Filee Rust 不會去動。
 - 裝成「所有使用者」（Program Files）時，內建 7-Zip 沒有寫入權限，要等重裝新版才會更新。
 - 不另外建立 Windows 排程工作，由常駐的外殼自己計時。
 
@@ -172,16 +172,18 @@ repo、conda 同一個 channel），而且版本要比較新，否則不採用�
 | 位置 | 內容 |
 |---|---|
 | `%APPDATA%\Filee\` | 跟上游共用：`settings.json`、`presets.json`、`profiles.json`、`history.json` |
-| `%LOCALAPPDATA%\FileeLite\logs\` | 外殼的每日紀錄 `filee-lite-YYYYMMDD.log`、引擎更新紀錄 `engine-update.log` |
+| `%LOCALAPPDATA%\FileeLite\logs\` | 外殼的每日紀錄 `filee-rust-YYYYMMDD.log`、引擎更新紀錄 `engine-update.log` |
 | `%LOCALAPPDATA%\FileeLite\lite.json` | `{"force300Dpi": false}` 可關掉 300 DPI 政策（沒有這個檔＝開） |
 | `%LOCALAPPDATA%\FileeLite\engine-update.json` | 每週更新的狀態；`"enabled": false` 關掉 |
 | `%LOCALAPPDATA%\FileeLite\policy.json` | 記錄一次性的調整（PDF 選單）已經做過 |
 | `%LOCALAPPDATA%\Filee\engines\` | Filee 下載的引擎 |
 | `%LOCALAPPDATA%\Filee\msoffice-check.json` | Microsoft Office 試轉結果（Office 改版就重測，失敗的隔天重測） |
 
+`%LOCALAPPDATA%\FileeLite` 這個資料夾沿用改名前的名字，從 Filee Lite 升級時狀態才不會丟。
+
 環境變數：`FILEE_MSOFFICE=off`（不用 Microsoft Office）、`FILEE_DATA_DIR`（資料夾改到別處，跟上游同一個變數，測試用）。
 
-出問題時先看最新的 `filee-lite-*.log`。例如選單是空的，會有一行 `donut: no slices for …`，寫出檔案格式、用到哪組選單、
+出問題時先看最新的 `filee-rust-*.log`。例如選單是空的，會有一行 `donut: no slices for …`，寫出檔案格式、用到哪組選單、
 預設與選單各有幾個。
 
 ## 從原始碼建置
@@ -199,7 +201,7 @@ repo、conda 同一個 channel），而且版本要比較新，否則不採用�
 git clone https://github.com/win81134679-dot/filee-rust
 cd filee-rust
 python 工具\update.py --init       # 抓上游原始碼（patches\UPSTREAM_TAG 記的版本，約 10 MB）並套上補丁
-python 工具\build_release.py       # 建置並打包 → dist\FileeLite-<版本>-lite.<N>-Setup.exe
+python 工具\build_release.py       # 建置並打包 → dist\FileeRust-<版本>-rust.<N>-Setup.exe
 ```
 
 `build_release.py` 一條指令做完：
@@ -220,7 +222,7 @@ python 工具\build_release.py       # 建置並打包 → dist\FileeLite-<版�
 
 ```powershell
 cd shell; cargo test; cargo build --release
-$env:FILEE_LITE_APP = "$PWD\..\build\stage\app"; .\target\release\filee-lite.exe --selftest
+$env:FILEE_LITE_APP = "$PWD\..\build\stage\app"; .\target\release\filee-rust.exe --selftest
 ```
 
 會碰到真實轉檔的整合測試預設跳過，要用一份資料複本跑：
@@ -250,7 +252,7 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 | 結束碼 | 意思 |
 |---|---|
 | 0 | 新安裝檔在 `dist\`，可以直接帶去別台裝 |
-| 2 | 安裝檔也建好了，但上游改到 Filee Lite 移植過的地方（觸發、選單、通知、資料格式、CLI 輸出），要看差異報告第 1 節 |
+| 2 | 安裝檔也建好了，但上游改到 Filee Rust 移植過的地方（觸發、選單、通知、資料格式、CLI 輸出），要看差異報告第 1 節 |
 | 1 | 失敗，訊息會說在哪一步；補丁套不上時照提示修好再 `--save-patch`、`--rebuild` |
 
 差異報告寫在 `docs\upstream-diffs\<舊>_to_<新>.md`：CHANGELOG 摘錄，以及每個改動的檔分成三類：
@@ -276,7 +278,7 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 
 | 路徑 | 內容 |
 |---|---|
-| `shell\` | Rust 原始碼（crate `filee-lite`） |
+| `shell\` | Rust 原始碼（crate `filee-rust`） |
 | `patches\hosted.patch`、`patches\UPSTREAM_TAG` | 對上游的補丁，與它對應的上游版本 |
 | `工具\` | `update.py`（閉環）、`build_release.py`（建置封裝）、`test_install.py`（靜默安裝測試）、字型下載、300 DPI、畫圖 |
 | `packaging\` | Inno Setup 腳本與繁中語言檔 |

@@ -1,5 +1,5 @@
 diff --git a/src/Filee.App/App.axaml.cs b/src/Filee.App/App.axaml.cs
-index 6888738..7b6d81d 100644
+index 6888738..c9706d8 100644
 --- a/src/Filee.App/App.axaml.cs
 +++ b/src/Filee.App/App.axaml.cs
 @@ -120,8 +120,10 @@ private void Start(IClassicDesktopStyleApplicationLifetime desktop)
@@ -8,10 +8,10 @@ index 6888738..7b6d81d 100644
          };
 -        triggers.Start();
 -        log.LogInformation("Filee {Version} started", UpdateService.CurrentVersion);
-+        var hosted = Program.Options.Hosted; // Filee Lite: filee-lite.exe owns the hook, tray, watch folders and integration
++        var hosted = Program.Options.Hosted; // Filee Rust: filee-rust.exe owns the hook, tray, watch folders and integration
 +        if (!hosted)
 +            triggers.Start();
-+        log.LogInformation("Filee {Version} started{Hosted}", UpdateService.CurrentVersion, hosted ? " (hosted by Filee Lite)" : "");
++        log.LogInformation("Filee {Version} started{Hosted}", UpdateService.CurrentVersion, hosted ? " (hosted by Filee Rust)" : "");
          // Which way the transparent windows (donut, toast) are drawn, for reports of one that isn't see-through (#269).
          if (OperatingSystem.IsWindows())
          {
@@ -52,7 +52,7 @@ index 6888738..7b6d81d 100644
 +    }
 +
 +    /// <summary>
-+    /// Filee Lite: a hosted Filee ends itself once no window is visible, no job is queued or running and no hosted
++    /// Filee Rust: a hosted Filee ends itself once no window is visible, no job is queued or running and no hosted
 +    /// request (merge order, save dialog) is pending, twice in a row, after a grace period for the first window.
 +    /// </summary>
 +    private static void ExitWhenIdle(IClassicDesktopStyleApplicationLifetime desktop)
@@ -85,7 +85,7 @@ index 6888738..7b6d81d 100644
          options.DeleteListFile();
 +        if (options.RunPreset is { } runPreset)
 +        {
-+            // Filee Lite: the donut slice was picked in filee-lite.exe; run it here as a drop on it would.
++            // Filee Rust: the donut slice was picked in filee-rust.exe; run it here as a drop on it would.
 +            if (options.ConvertFiles.Count > 0)
 +                AppHost.Get<RadialController>().RunHosted(runPreset, options.ConvertFiles);
 +            return;
@@ -118,7 +118,7 @@ index 5d55510..5450c8b 100644
    "profile.images": "圖片",
    "profile.pdf": "PDF",
 diff --git a/src/Filee.App/Program.cs b/src/Filee.App/Program.cs
-index 50e1fde..1217e28 100644
+index 50e1fde..721be1c 100644
 --- a/src/Filee.App/Program.cs
 +++ b/src/Filee.App/Program.cs
 @@ -11,6 +11,7 @@
@@ -133,10 +133,10 @@ index 50e1fde..1217e28 100644
          PreloadedStore = null;
          Log = StartupDiagnostics.CreateEarlyLogger(Path.Combine(UserDataStore.DefaultDirectory, "logs"), out var earlyStoreLogger);
          StartupDiagnostics.LogUnhandledExceptions(Log);
-+        if (Options.Hosted && Options.UpdateEngines is { } updateEngines) // Filee Lite: weekly, no window and no lock
-+            return FileeLiteEngineUpdate.Run(updateEngines, Log);
-+        if (Options.Hosted && Options.SeedData) // Filee Lite: first run on a new computer, no window and no lock
-+            return FileeLiteSeedData.Run(Log);
++        if (Options.Hosted && Options.UpdateEngines is { } updateEngines) // Filee Rust: weekly, no window and no lock
++            return FileeRustEngineUpdate.Run(updateEngines, Log);
++        if (Options.Hosted && Options.SeedData) // Filee Rust: first run on a new computer, no window and no lock
++            return FileeRustSeedData.Run(Log);
          Elevation = Filee.Platform.Windows.Elevation.Probe();
          var startup = StartupDiagnostics.Describe(UpdateService.CurrentVersion, Environment.ProcessPath,
              StartupDiagnostics.InstallKind(UpdateService.IsInstalled, UpdateService.IsReleaseBuild), Elevation,
@@ -146,20 +146,20 @@ index 50e1fde..1217e28 100644
      new Uri("avares://Filee/Assets/Fonts", UriKind.Absolute));
 +
 +/// <summary>
-+/// Filee Lite (<c>Filee.exe --hosted --update-engines[=ids]</c>, started weekly by filee-lite.exe, no window): brings
++/// Filee Rust (<c>Filee.exe --hosted --update-engines[=ids]</c>, started weekly by filee-rust.exe, no window): brings
 +/// the engines Filee downloaded, and the 7-Zip next to Filee.exe, up to the newest pinned version. The pins are this
 +/// build's engines.json, or the latest Filee release's where that one is newer and comes from the same publisher (same
 +/// host; same owner/repo on github.com, same channel on conda.anaconda.org). Every download is SHA-256 checked by
 +/// EngineInstaller as usual. Packages in <c>ids</c> are installed when missing. Exit code 0 = up to date, 1 = a
-+/// package failed (filee-lite.exe tries again the next day). One line per package on standard output.
++/// package failed (filee-rust.exe tries again the next day). One line per package on standard output.
 +/// FILEE_LITE_ENGINES_DIR (tests) puts both engine folders there.
 +/// </summary>
 +/// <summary>
-+/// Filee Lite: upstream keeps its built-in library in memory until something is saved, so on a computer where Filee
-+/// never ran there is no presets.json / profiles.json and filee-lite.exe (which reads the files) would show an empty
++/// Filee Rust: upstream keeps its built-in library in memory until something is saved, so on a computer where Filee
++/// never ran there is no presets.json / profiles.json and filee-rust.exe (which reads the files) would show an empty
 +/// donut. This writes upstream's own defaults, in upstream's own format, only for the files that are missing.
 +/// </summary>
-+internal static class FileeLiteSeedData
++internal static class FileeRustSeedData
 +{
 +    public static int Run(ILogger log)
 +    {
@@ -178,14 +178,14 @@ index 50e1fde..1217e28 100644
 +        }
 +        catch (Exception ex)
 +        {
-+            log.LogWarning(ex, "Filee Lite could not write the default library");
++            log.LogWarning(ex, "Filee Rust could not write the default library");
 +            Console.WriteLine($"failed: {ex.Message}");
 +            return 1;
 +        }
 +    }
 +}
 +
-+internal static class FileeLiteEngineUpdate
++internal static class FileeRustEngineUpdate
 +{
 +    private const string LatestRelease = "https://api.github.com/repos/KnifeLemon/Filee/releases/latest";
 +    private const string ManifestAt = "https://raw.githubusercontent.com/KnifeLemon/Filee/{0}/src/Filee.Engines/Infrastructure/engines.json";
@@ -198,7 +198,7 @@ index 50e1fde..1217e28 100644
 +        }
 +        catch (Exception ex)
 +        {
-+            log.LogWarning(ex, "Filee Lite engine update failed");
++            log.LogWarning(ex, "Filee Rust engine update failed");
 +            Console.WriteLine($"failed: {ex.Message}");
 +            return 1;
 +        }
@@ -232,7 +232,7 @@ index 50e1fde..1217e28 100644
 +            catch (Exception ex) when (ex is not OutOfMemoryException)
 +            {
 +                failed++;
-+                log.LogWarning(ex, "Filee Lite engine update: {Package} failed", package.Id);
++                log.LogWarning(ex, "Filee Rust engine update: {Package} failed", package.Id);
 +                Console.WriteLine($"failed {package.Id}: {ex.Message}");
 +            }
 +        }
@@ -258,14 +258,14 @@ index 50e1fde..1217e28 100644
 +            : shipped ? !string.Equals(pins["7zip"].Sha256, built["7zip"].Sha256, StringComparison.OrdinalIgnoreCase)
 +            : install.Contains("7zip");
 +        if (stale && shipped && !Writable(bundledRoot))
-+            // Installed for all users (Program Files): it is updated with Filee Lite itself.
-+            Console.WriteLine($"read-only 7zip {pins["7zip"].Version} (installed for all users; reinstall Filee Lite to update it)");
++            // Installed for all users (Program Files): it is updated with Filee Rust itself.
++            Console.WriteLine($"read-only 7zip {pins["7zip"].Version} (installed for all users; reinstall Filee Rust to update it)");
 +        else if (stale)
 +            await Update(bundled, sevenZip);
 +        else
 +            Console.WriteLine(shipped ? "current 7zip" : "absent 7zip");
 +
-+        log.LogInformation("Filee Lite engine update done, {Failed} failed", failed);
++        log.LogInformation("Filee Rust engine update done, {Failed} failed", failed);
 +        return failed == 0 ? 0 : 1;
 +    }
 +
@@ -311,7 +311,7 @@ index 50e1fde..1217e28 100644
 +        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException
 +                                       or KeyNotFoundException or InvalidOperationException or FormatException)
 +        {
-+            log.LogInformation("Filee Lite engine update: latest pins unavailable ({Error}); using this build's", ex.Message);
++            log.LogInformation("Filee Rust engine update: latest pins unavailable ({Error}); using this build's", ex.Message);
 +            Console.WriteLine($"manifest unavailable: {ex.Message}");
 +        }
 +        return newer;
@@ -347,7 +347,7 @@ index 50e1fde..1217e28 100644
 +    }
 +}
 diff --git a/src/Filee.App/Services/CommandLine.cs b/src/Filee.App/Services/CommandLine.cs
-index eb17faa..9713dfc 100644
+index eb17faa..234a4a4 100644
 --- a/src/Filee.App/Services/CommandLine.cs
 +++ b/src/Filee.App/Services/CommandLine.cs
 @@ -41,8 +41,20 @@ public sealed record CommandLine(
@@ -361,12 +361,12 @@ index eb17faa..9713dfc 100644
 +    IReadOnlyList<string>? UpdateEngines = null,
 +    bool SeedData = false)
  {
-+    // Filee Lite (patches/hosted.patch):
-+    //   Filee.exe --hosted ...             started by filee-lite.exe: no tray, no global hook, no watch folders, no
++    // Filee Rust (patches/hosted.patch):
++    //   Filee.exe --hosted ...             started by filee-rust.exe: no tray, no global hook, no watch folders, no
 +    //                                      system integration or update checks; exits once no window or job is left
 +    //   Filee.exe --hosted --run=<id> a b  run preset <id> on these files as a donut drop would (tools open their window)
 +    //   Filee.exe --hosted --update-engines[=a,b]  bring Filee's engines up to date without a window (weekly, from
-+    //                                      filee-lite.exe); the listed packages are installed when missing
++    //                                      filee-rust.exe); the listed packages are installed when missing
 +    //   Filee.exe --hosted --seed-data     write the built-in presets.json / profiles.json when they are missing
 +    //                                      (a computer where Filee never ran), then exit without a window
      /// <summary>File name prefix of list files written by FileeExplorerMenu.dll (LIST_PREFIX there) into %TEMP%.</summary>
@@ -415,20 +415,20 @@ index eb17faa..9713dfc 100644
  
      /// <summary>"--Name=Value" → ("--name", "Value"); "--name" → ("--name", null).</summary>
 diff --git a/src/Filee.App/Services/RadialController.cs b/src/Filee.App/Services/RadialController.cs
-index 943831e..ffa42a1 100644
+index 943831e..9a1b705 100644
 --- a/src/Filee.App/Services/RadialController.cs
 +++ b/src/Filee.App/Services/RadialController.cs
 @@ -367,6 +367,55 @@ private void Convert(int index, int sub, IReadOnlyList<string> files, WebDrop? w
          ShowProgress(job);
      }
  
-+    /// <summary>Filee Lite: hosted requests (merge order, save dialog) still waiting for the user.</summary>
++    /// <summary>Filee Rust: hosted requests (merge order, save dialog) still waiting for the user.</summary>
 +    public static int HostedPending => _hostedPending;
 +
 +    private static int _hostedPending;
 +
 +    /// <summary>
-+    /// Filee Lite (<c>--hosted --run=&lt;id&gt;</c>): runs preset <paramref name="presetId"/> on <paramref name="files"/>
++    /// Filee Rust (<c>--hosted --run=&lt;id&gt;</c>): runs preset <paramref name="presetId"/> on <paramref name="files"/>
 +    /// as a drop on its slice would, without a donut: a tool opens its window, a merge asks for the order, "Ask every
 +    /// time" asks where to save, anything else converts with the toast.
 +    /// </summary>
@@ -475,7 +475,7 @@ index 943831e..ffa42a1 100644
      {
          try
 diff --git a/src/Filee.App/Services/SingleInstance.cs b/src/Filee.App/Services/SingleInstance.cs
-index 93a25df..a505284 100644
+index 93a25df..8a6892f 100644
 --- a/src/Filee.App/Services/SingleInstance.cs
 +++ b/src/Filee.App/Services/SingleInstance.cs
 @@ -11,7 +11,8 @@ namespace Filee.App.Services;
@@ -484,12 +484,12 @@ index 93a25df..a505284 100644
      // string.GetHashCode() is randomized per process, so a stable hash is required for both processes to agree.
 -    internal static readonly string DefaultName = NameFor(Environment.UserName, UserDataStore.OverrideDirectory);
 +    internal static readonly string DefaultName = NameFor(Environment.UserName, UserDataStore.OverrideDirectory)
-+        + (Environment.GetCommandLineArgs().Any(a => a.Equals("--hosted", StringComparison.OrdinalIgnoreCase)) ? "-lite" : ""); // Filee Lite
++        + (Environment.GetCommandLineArgs().Any(a => a.Equals("--hosted", StringComparison.OrdinalIgnoreCase)) ? "-lite" : ""); // Filee Rust
      private readonly Mutex _mutex;
      private readonly string _name;
      private readonly CancellationTokenSource _cts = new();
 diff --git a/src/Filee.Engines/EngineRegistry.cs b/src/Filee.Engines/EngineRegistry.cs
-index 5212f3c..6e50479 100644
+index 5212f3c..da254dd 100644
 --- a/src/Filee.Engines/EngineRegistry.cs
 +++ b/src/Filee.Engines/EngineRegistry.cs
 @@ -32,7 +32,7 @@ public static class EngineRegistry
@@ -497,7 +497,7 @@ index 5212f3c..6e50479 100644
      /// Instantiates all converters. Order only matters as a tie-breaker when no priority is set, so it mirrors
      /// AppSettings.EnginePriority: built-in engines first, the optional downloads last. Software installed on the
 -    /// system (Microsoft Office, a system-wide LibreOffice) is never used.
-+    /// system (a system-wide LibreOffice) is never used; Microsoft Office is (Filee Lite).
++    /// system (a system-wide LibreOffice) is never used; Microsoft Office is (Filee Rust).
      /// </summary>
      /// <param name="loggers">
      /// The app's log; FFmpeg writes which hardware encoders work and when one failed, LibreOffice when a file needed
@@ -506,10 +506,10 @@ index 5212f3c..6e50479 100644
          new TesseractConverter(),
          new CalibreConverter(),
 -        new LibreOfficeConverter(env, loggers?.CreateLogger<LibreOfficeConverter>()),
-+        .. OfficeEngines(env, loggers), // Filee Lite: Microsoft Office first, LibreOffice behind it
++        .. OfficeEngines(env, loggers), // Filee Rust: Microsoft Office first, LibreOffice behind it
      ];
  
-+    /// <summary>Filee Lite: Microsoft Office (when it converts on this PC) with LibreOffice as its fallback.</summary>
++    /// <summary>Filee Rust: Microsoft Office (when it converts on this PC) with LibreOffice as its fallback.</summary>
 +    private static IConverter[] OfficeEngines(EngineEnvironment env, ILoggerFactory? loggers)
 +    {
 +        var libreOffice = new LibreOfficeConverter(env, loggers?.CreateLogger<LibreOfficeConverter>());
@@ -520,14 +520,14 @@ index 5212f3c..6e50479 100644
      public static IPdfMerger? FindPdfMerger(IEnumerable<IConverter> converters) =>
          converters.OfType<IPdfMerger>().FirstOrDefault();
 diff --git a/src/Filee.Engines/Infrastructure/EngineInstaller.cs b/src/Filee.Engines/Infrastructure/EngineInstaller.cs
-index 90b5cf0..791a110 100644
+index 90b5cf0..751be38 100644
 --- a/src/Filee.Engines/Infrastructure/EngineInstaller.cs
 +++ b/src/Filee.Engines/Infrastructure/EngineInstaller.cs
 @@ -331,6 +331,18 @@ private static string MsiProgramFolder(string id, string staging)
                            ?? throw new InvalidDataException("ebook-convert.exe not found in the calibre package.");
              return Path.GetDirectoryName(convert)!;
          }
-+        if (id == "7zip") // Filee Lite: the weekly update replaces the bundled 7-Zip from its MSI
++        if (id == "7zip") // Filee Rust: the weekly update replaces the bundled 7-Zip from its MSI
 +        {
 +            var sevenZip = Directory.EnumerateFiles(staging, "7z.exe", SearchOption.AllDirectories).FirstOrDefault()
 +                           ?? throw new InvalidDataException("7z.exe not found in the 7-Zip package.");
@@ -544,11 +544,11 @@ index 90b5cf0..791a110 100644
          var libreOffice = Path.GetDirectoryName(Path.GetDirectoryName(soffice)!)!; // folder with program/, share/
 diff --git a/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs b/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs
 new file mode 100644
-index 0000000..3312d8e
+index 0000000..e38be7f
 --- /dev/null
 +++ b/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs
 @@ -0,0 +1,515 @@
-+// Filee Lite (patches/hosted.patch): Microsoft Office as the first choice for Office documents. Word, Excel and
++// Filee Rust (patches/hosted.patch): Microsoft Office as the first choice for Office documents. Word, Excel and
 +// PowerPoint are driven through their COM automation (the same as "Save As" / "Export to PDF" in the program). An
 +// application only counts as installed after it really converted a small test file on this PC (an unlicensed,
 +// half-installed or blocked Office does not), checked once per Office version and kept in

@@ -104,7 +104,7 @@ pub fn init() {
         CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             w!("FileeLiteToast"),
-            w!("Filee Lite toast"),
+            w!("Filee Rust toast"),
             WS_POPUP,
             0,
             0,

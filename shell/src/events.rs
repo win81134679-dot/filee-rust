@@ -19,7 +19,7 @@ pub enum AppEvent {
     Donut(DonutEvent),
     /// A job's status changed (started, progressed, finished).
     Job(JobStatus),
-    /// Files handed over by a later launch (`filee-lite.exe --convert …`, the Explorer verb).
+    /// Files handed over by a later launch (`filee-rust.exe --convert …`, the Explorer verb).
     Convert(Vec<std::path::PathBuf>),
     /// A file under %APPDATA%\Filee changed: reload settings / presets / profiles.
     DataChanged,

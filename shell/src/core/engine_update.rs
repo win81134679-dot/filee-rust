@@ -1,6 +1,6 @@
 //! The weekly, silent engine update (2026-10-29: 「一週一次自動更新安裝的套件確保安全性(靜默不打擾User)」).
 //!
-//! Once a week filee-lite.exe starts `Filee.exe --hosted --update-engines` (patches/hosted.patch: no window, no
+//! Once a week filee-rust.exe starts `Filee.exe --hosted --update-engines` (patches/hosted.patch: no window, no
 //! single-instance lock, nothing in the data files). It brings the engines Filee downloaded and the bundled 7-Zip up
 //! to the newest pinned versions; upstream's installer checks every download's SHA-256. It only starts when nothing
 //! is converting, no hosted Filee window is open and the PC is not on battery, with below-normal priority and no
@@ -8,7 +8,7 @@
 //!
 //! State: `%LOCALAPPDATA%\FileeLite\engine-update.json` (`lastSuccess` / `lastAttempt`, Unix seconds; `enabled`).
 //! A failed run is tried again a day later. The last run's output: `logs\engine-update.log`.
-//! Off: `"enabled": false` in that file, or `engine-update.disabled` next to filee-lite.exe (Setup writes it when
+//! Off: `"enabled": false` in that file, or `engine-update.disabled` next to filee-rust.exe (Setup writes it when
 //! its "update weekly" task is unticked).
 
 use std::path::PathBuf;

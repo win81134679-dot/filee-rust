@@ -2,7 +2,7 @@
 //! on upstream's presets (a port of `工具\filee_300dpi.py`).
 //!
 //! No Run key (start with Windows is the installer's job), and the registry is only written by an installed
-//! filee-lite.exe: never from `shell\target\` and never with FILEE_DATA_DIR set (development and tests).
+//! filee-rust.exe: never from `shell\target\` and never with FILEE_DATA_DIR set (development and tests).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -40,15 +40,15 @@ pub fn apply(settings: &Value) {
 // ---------------------------------------------------------------------------------------------------------------
 // PDF donut: "merge PDF" (only useful with several files) becomes a group "轉成 Office" (DOCX, XLSX, PPTX)
 
-/// Id of the group preset Filee Lite adds (user's request 2026-10-29).
+/// Id of the group preset Filee Rust adds (user's request 2026-10-29).
 pub const PDF_OFFICE_GROUP: &str = "lite-pdf-office";
 const PDF_OFFICE_MEMBERS: [&str; 3] = ["to-docx", "to-xlsx", "to-pptx"];
 
-/// Once per user (`policy.json` in Filee Lite's folder): after that, what the user does in upstream's editor stands.
+/// Once per user (`policy.json` in Filee Rust's folder): after that, what the user does in upstream's editor stands.
 pub fn apply_pdf_office_once() {
     // With FILEE_DATA_DIR (development, tests) the marker stays beside that data copy, never in the real folder.
     let marker = match std::env::var_os("FILEE_DATA_DIR") {
-        Some(_) => crate::paths::data_dir().join("filee-lite-policy.json"),
+        Some(_) => crate::paths::data_dir().join("filee-rust-policy.json"),
         None => crate::paths::lite_dir().join("policy.json"),
     };
     let mut policy = util::read_json_file(&marker).filter(Value::is_object).unwrap_or_else(|| serde_json::json!({}));
@@ -103,7 +103,7 @@ pub fn swap_pdf_merge(profiles: &mut Value) -> bool {
 // ---------------------------------------------------------------------------------------------------------------
 // 300 DPI
 
-/// `lite.json` in Filee Lite's folder: `{"force300Dpi": true}`; on when the file or the key is missing.
+/// `lite.json` in Filee Rust's folder: `{"force300Dpi": true}`; on when the file or the key is missing.
 pub fn force_300_dpi() -> bool {
     util::read_json_file(&crate::paths::lite_dir().join("lite.json"))
         .and_then(|v| v.get("force300Dpi").and_then(Value::as_bool))
@@ -351,19 +351,19 @@ mod tests {
 
     #[test]
     fn context_menu_values_are_what_the_verb_needs() {
-        let vals = context_menu_values(&PathBuf::from(r"C:\Program Files\Filee Lite\filee-lite.exe"), "Convert with Filee");
+        let vals = context_menu_values(&PathBuf::from(r"C:\Program Files\Filee Rust\filee-rust.exe"), "Convert with Filee");
         assert_eq!(vals[0], (VERB_KEY.into(), "MUIVerb".into(), "Convert with Filee".into()));
-        assert_eq!(vals[1].2, r#""C:\Program Files\Filee Lite\filee-lite.exe",0"#);
+        assert_eq!(vals[1].2, r#""C:\Program Files\Filee Rust\filee-rust.exe",0"#);
         let command = vals.iter().find(|(k, n, _)| k.ends_with(r"\command") && n.is_empty()).unwrap();
-        assert_eq!(command.2, r#""C:\Program Files\Filee Lite\filee-lite.exe" --convert "%1""#);
+        assert_eq!(command.2, r#""C:\Program Files\Filee Rust\filee-rust.exe" --convert "%1""#);
         assert!(vals.iter().all(|(k, _, _)| k.starts_with(r"Software\Classes\*\shell\FileeLite")));
     }
 
     #[test]
     fn development_builds_never_write_the_registry() {
-        assert!(is_development_build(Path::new(r"C:\Work\Filee\shell\target\debug\filee-lite.exe")));
+        assert!(is_development_build(Path::new(r"C:\Work\Filee\shell\target\debug\filee-rust.exe")));
         assert!(is_development_build(Path::new(r"C:\Work\Filee\shell\target\release\deps\filee_lite-1a2b.exe")));
-        assert!(!is_development_build(Path::new(r"C:\Program Files\Filee Lite\filee-lite.exe")));
+        assert!(!is_development_build(Path::new(r"C:\Program Files\Filee Rust\filee-rust.exe")));
         // The running test binary is itself a development build.
         assert!(registry_allowed().is_none());
         // And applying with the menu on or off from here touches nothing.

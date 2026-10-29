@@ -1,14 +1,14 @@
-//! Filee Lite: the resident part of Filee in Rust. Gestures, donut, toast and tray live here; conversions run
+//! Filee Rust: the resident part of Filee in Rust. Gestures, donut, toast and tray live here; conversions run
 //! in upstream's `filee-cli.exe`; settings and interactive tools open upstream's `Filee.exe --hosted` on demand.
 //!
 //! ```text
-//! filee-lite.exe                     start resident (tray); a second start opens upstream's settings
-//! filee-lite.exe --background        start resident without opening anything (sign-in)
-//! filee-lite.exe --convert a b …     open the donut for these files (Explorer verb; forwarded to the running one)
-//! filee-lite.exe --convert-list f    same, one path per line in a UTF-8 file
-//! filee-lite.exe --settings          open upstream's settings window
-//! filee-lite.exe --quit              ask the running one to exit
-//! filee-lite.exe --selftest          check the install (app folder, CLI, data) and exit; prints a report
+//! filee-rust.exe                     start resident (tray); a second start opens upstream's settings
+//! filee-rust.exe --background        start resident without opening anything (sign-in)
+//! filee-rust.exe --convert a b …     open the donut for these files (Explorer verb; forwarded to the running one)
+//! filee-rust.exe --convert-list f    same, one path per line in a UTF-8 file
+//! filee-rust.exe --settings          open upstream's settings window
+//! filee-rust.exe --quit              ask the running one to exit
+//! filee-rust.exe --selftest          check the install (app folder, CLI, data) and exit; prints a report
 //! ```
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -96,7 +96,7 @@ fn main() {
         std::process::exit(selftest::run());
     }
 
-    // A later launch hands its request to the running Filee Lite and ends.
+    // A later launch hands its request to the running Filee Rust and ends.
     let instance = single::acquire();
     if !instance.is_first {
         let forwarded = if args.quit {
@@ -121,7 +121,7 @@ fn main() {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let _ = OleInitialize(None);
     }
-    info!("Filee Lite {} starting; app {}", env!("CARGO_PKG_VERSION"), paths::app_dir().display());
+    info!("Filee Rust {} starting; app {}", env!("CARGO_PKG_VERSION"), paths::app_dir().display());
 
     core::store::load();
     let settings = core::store::settings();
@@ -157,7 +157,7 @@ fn main() {
     } else if args.settings || (!args.background && !raw.iter().any(|a| a.starts_with("--"))) {
         events::post(AppEvent::OpenSettings);
     }
-    info!("Filee Lite started");
+    info!("Filee Rust started");
 
     let mut msg = MSG::default();
     unsafe {
@@ -168,7 +168,7 @@ fn main() {
     }
     input::stop();
     ui::tray::remove();
-    info!("Filee Lite exited");
+    info!("Filee Rust exited");
 }
 
 /// Everything derived from settings.json; at start and whenever upstream (or the tray) changed it.
@@ -192,7 +192,7 @@ fn create_main_window() -> HWND {
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             MAIN_CLASS,
-            w!("Filee Lite"),
+            w!("Filee Rust"),
             WINDOW_STYLE::default(),
             0,
             0,
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn convert_list_reads_one_path_per_line() {
-        let dir = std::env::temp_dir().join("filee-lite-test-list");
+        let dir = std::env::temp_dir().join("filee-rust-test-list");
         std::fs::create_dir_all(&dir).unwrap();
         let exe = std::env::current_exe().unwrap();
         let list = dir.join("list.txt");

@@ -65,13 +65,13 @@
    **補丁碰到**（`hosted.patch` 的 4 個檔，衝突會在這裡）、**自動跟上**（其餘：引擎、工具視窗、翻譯，重編就有）；附 CHANGELOG 段落。
 4. 退補丁 → checkout 新 tag → `git apply --3way` 補丁；衝突就停、告訴人改哪裡。
 5. `工具/build_release.py`：字型 → `dotnet publish` → 官方 Portable（SHA256SUMS）→ `cargo test`／`build` → 組裝 → `--selftest`
-   ＋真的轉一次 → Inno Setup → `dist/FileeLite-<ver>-lite.1-Setup.exe`。
+   ＋真的轉一次 → Inno Setup → `dist/FileeRust-<ver>-rust.1-Setup.exe`。
 6. 結束碼 0 = 直接可用；2 = 安裝檔建好了，但報告第 1 節有外殼要跟的改動，人看過、移植、`--rebuild`。
 
 ## 風險
 
 - **防毒相容（實測過 Bitdefender）**：自編未簽章 exe 掛全域 hook＋開機自啟，2026-10-26 被擋過。外殼不自己寫 Run 機碼（安裝檔的勾選項寫），
-  使用者要在 Bitdefender 對 `filee-lite.exe` 加信任。
+  使用者要在 Bitdefender 對 `filee-rust.exe` 加信任。
 - **SmartScreen（別台）**：安裝檔未簽章，要按「其他資訊 → 仍要執行」。
 - **共用資料檔**：上游 GUI 存檔時整檔覆寫、不重讀。hosted 開著時外殼的寫入（history、paused、300 DPI）排隊到它結束。
 - **原版 Filee 同時在跑**：兩個 hook、兩個 donut。安裝檔會請它結束並建議解除安裝（設定共用，不會遺失）。

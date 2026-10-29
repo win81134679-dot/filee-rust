@@ -44,7 +44,7 @@ pub struct Faces {
     pub back: Vec<Slice>,
 }
 
-/// Colours and sizes for everything Filee Lite draws (donut, toast). Filled by `ui::theme` from settings.json's
+/// Colours and sizes for everything Filee Rust draws (donut, toast). Filled by `ui::theme` from settings.json's
 /// `theme` and upstream's palette; ARGB as 0xAARRGGBB.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Palette {

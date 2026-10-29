@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Filee Lite 動態閉環流程圖</title>
+  <title>Filee Rust 動態閉環流程圖</title>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -178,7 +178,7 @@
 
     <div class="diagram-container">
       <svg viewBox="0 200 1280 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-motion-loop-title lite-motion-loop-desc">
-        <title id="lite-motion-loop-title">Filee Lite 閉環流程</title>
+        <title id="lite-motion-loop-title">Filee Rust 閉環流程</title>
         <desc id="lite-motion-loop-desc">update.py 查到上游新 tag 並寫差異報告，換上補丁、重編上游、以官方 Portable 為底組裝並編 Rust 外殼、自我檢查後產出安裝檔；補丁衝突時停下由人修，報告列出外殼要跟的改動時由人移植 shell 後重建。</desc>
         <defs>
           <marker id="lite-motion-loop-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>

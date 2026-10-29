@@ -1,4 +1,4 @@
-//! `filee-lite.exe --selftest`: checks an installation without showing anything (installer and update.py use
+//! `filee-rust.exe --selftest`: checks an installation without showing anything (installer and update.py use
 //! it). Prints one line per check to stdout, `PASS` / `FAIL` at the end; exit code 0 when everything passed.
 
 use std::process::Command;

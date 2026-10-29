@@ -1,7 +1,7 @@
 //! What upstream can convert: the format table (`filee-cli formats`) and, per source format, which targets work now
 //! and which only with optional engines (`filee-cli formats <id>`). Spec 01 §5.4.
 //!
-//! The format list ships with Filee Lite (`formats_default.txt`, the output of v2.2.0) so file types are known from
+//! The format list ships with Filee Rust (`formats_default.txt`, the output of v2.2.0) so file types are known from
 //! the first drag. The per-source target sets are built in a background thread (one CLI call per source format,
 //! below-normal priority), cached in `%LOCALAPPDATA%\FileeLite\formats-<version>.json`, and until a source format's
 //! entry exists every route is treated as possible.

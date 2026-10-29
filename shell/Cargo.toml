@@ -1,12 +1,12 @@
 [package]
-name = "filee-lite"
+name = "filee-rust"
 version = "0.1.0"
 edition = "2021"
-description = "Filee Lite: a small resident shell (global gestures, donut, toast, tray) around the upstream Filee converter."
+description = "Filee Rust: a small resident shell (global gestures, donut, toast, tray) around the upstream Filee converter."
 license = "MIT"
 
 [[bin]]
-name = "filee-lite"
+name = "filee-rust"
 path = "src/main.rs"
 
 [dependencies]

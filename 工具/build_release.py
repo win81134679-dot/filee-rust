@@ -1,4 +1,4 @@
-"""Build a Filee Lite installer for the upstream version checked out in upstream/.
+"""Build a Filee Rust installer for the upstream version checked out in upstream/.
 
 Steps (each one stops the build with a message when it fails):
   1. patch   upstream/ is at a tag and patches/hosted.patch is applied (3-way; a conflict stops here)
@@ -6,12 +6,12 @@ Steps (each one stops the build with a message when it fails):
   3. dotnet  publish the patched Filee.App (self-contained, ReadyToRun) → build/upstream-publish
   4. base    the official win-Portable.zip of that tag (SHA256SUMS checked) → cache/upstream-releases/<tag>
   5. stage   build/stage: portable + patched Filee.dll and Filee.Engines.dll (+pdb/xml), i18n, icon, licenses, README.txt
-  6. cargo   shell/ release build → build/stage/filee-lite.exe (cargo test first)
-  7. check   filee-cli version, filee-lite --selftest, one real conversion with the staged CLI
-  8. iscc    packaging/FileeLite.iss → dist/FileeLite-<ver>-Setup.exe
+  6. cargo   shell/ release build → build/stage/filee-rust.exe (cargo test first)
+  7. check   filee-cli version, filee-rust --selftest, one real conversion with the staged CLI
+  8. iscc    packaging/FileeRust.iss → dist/FileeRust-<ver>-Setup.exe
 
 Usage: python build_release.py [--lite-rev N] [--skip-tests]
-Version: <upstream version>-lite.<N> (N from --lite-rev, default LITE_REV below); file version <upstream>.<N>.
+Version: <upstream version>-rust.<N> (N from --lite-rev, default LITE_REV below); file version <upstream>.<N>.
 Raise LITE_REV whenever a changed build goes to other computers, so its installer has a new name.
 """
 import argparse
@@ -26,7 +26,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 3  # 2026-10-29: PDF donut gets the Office group (2: the empty-donut fix)
+LITE_REV = 4  # 2026-10-29: renamed Filee Lite -> Filee Rust (3: PDF Office group, 2: the empty-donut fix)
 UPSTREAM = ROOT / "upstream"
 PATCH = ROOT / "patches" / "hosted.patch"
 BUILD = ROOT / "build"
@@ -159,12 +159,12 @@ def stage(tag: str, portable: Path, exe: Path) -> None:
     licenses.mkdir()
     shutil.copy2(UPSTREAM / "LICENSE", licenses / "Filee-LICENSE.txt")
     shutil.copy2(UPSTREAM / "THIRD-PARTY-NOTICES.md", licenses / "Filee-THIRD-PARTY-NOTICES.md")
-    shutil.copy2(ROOT / "LICENSE", licenses / "FileeLite-LICENSE.txt")
+    shutil.copy2(ROOT / "LICENSE", licenses / "FileeRust-LICENSE.txt")
     shutil.copy2(PATCH, licenses / "hosted.patch")
-    shutil.copy2(exe, STAGE / "filee-lite.exe")
+    shutil.copy2(exe, STAGE / "filee-rust.exe")
     (STAGE / "README.txt").write_text(
-        f"Filee Lite for Filee {tag}\r\n\r\n"
-        "filee-lite.exe runs in the tray: Ctrl+drag files in Explorer for the donut, Ctrl+Alt+Space for the\r\n"
+        f"Filee Rust for Filee {tag}\r\n\r\n"
+        "filee-rust.exe runs in the tray: Ctrl+drag files in Explorer for the donut, Ctrl+Alt+Space for the\r\n"
         "selected files, right-click > Convert with Filee. Settings and tools open upstream Filee on demand.\r\n"
         "Conversions run in app\\filee-cli.exe. Data: %APPDATA%\\Filee (shared with upstream Filee).\r\n"
         "Office documents go to Microsoft Office first when it converts on this PC, else to LibreOffice.\r\n"
@@ -180,10 +180,10 @@ def smoke(tag: str) -> None:
     if tag[1:] not in version:
         raise Fail(f"staged filee-cli says '{version}', expected {tag}")
     print(f"filee-cli: {version}")
-    report = run([str(STAGE / "filee-lite.exe"), "--selftest"], quiet=True)
+    report = run([str(STAGE / "filee-rust.exe"), "--selftest"], quiet=True)
     print(report.strip())
     if not report.strip().endswith("PASS"):
-        raise Fail("filee-lite --selftest failed")
+        raise Fail("filee-rust --selftest failed")
     # One real conversion with the staged CLI, on a copy of the data (the user's own data is never written).
     work = BUILD / "smoke"
     if work.exists():
@@ -213,7 +213,7 @@ def main() -> int:
         tag = upstream_tag()
         ensure_patch()
         version = tag[1:]
-        app_ver = f"{version}-lite.{args.lite_rev}"
+        app_ver = f"{version}-rust.{args.lite_rev}"
         file_ver = f"{version}.{args.lite_rev}"
 
         step("2 fonts")
@@ -241,7 +241,7 @@ def main() -> int:
             run(["cargo", "test", "--release", "--quiet"], cwd=SHELL, quiet=True)
             print("cargo test: ok")
         run(["cargo", "build", "--release", "--quiet"], cwd=SHELL, quiet=True)
-        exe = SHELL / "target" / "release" / "filee-lite.exe"
+        exe = SHELL / "target" / "release" / "filee-rust.exe"
 
         step("5 stage")
         stage(tag, portable, exe)
@@ -256,13 +256,13 @@ def main() -> int:
             raise Fail("Inno Setup 6 (ISCC.exe) not found")
         DIST.mkdir(exist_ok=True)
         run([str(iscc), "/Q", f"/DAppVer={app_ver}", f"/DFileVer={file_ver}", f"/DStage={STAGE}",
-             f"/DOutDir={DIST}", str(ROOT / "packaging" / "FileeLite.iss")], quiet=True)
-        setup = DIST / f"FileeLite-{app_ver}-Setup.exe"
+             f"/DOutDir={DIST}", str(ROOT / "packaging" / "FileeRust.iss")], quiet=True)
+        setup = DIST / f"FileeRust-{app_ver}-Setup.exe"
         if not setup.exists():
             raise Fail(f"{setup.name} was not made")
         manifest = {"upstream": tag, "version": app_ver, "setup": setup.name,
                     "sha256": sha256(setup), "bytes": setup.stat().st_size}
-        (DIST / f"FileeLite-{app_ver}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        (DIST / f"FileeRust-{app_ver}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         print(f"PASS: {setup} ({setup.stat().st_size / 1e6:.1f} MB)")
         return 0
     except Fail as e:
