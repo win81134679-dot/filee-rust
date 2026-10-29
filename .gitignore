@@ -1,0 +1,14 @@
+# Rebuildable: downloads, build output, installers
+/cache/
+/build/
+/dist/
+/shell/target/
+# The upstream checkout is its own git repository (patches/hosted.patch holds our changes)
+/upstream/
+# Personal notes and local files (not published)
+/CLAUDE.md
+/PLAN.md
+/docs/實機測試清單.md
+/.impeccable/
+/*.url
+/*.png

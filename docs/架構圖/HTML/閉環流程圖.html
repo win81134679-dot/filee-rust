@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filee Lite 閉環流程圖</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #f4f7fb; }
+    /* A2 橫式滿版（594×420 mm = 2245×1587 CSS px）：SVG 就是整頁，標題也畫在 SVG 裡 */
+    body { width: 2245px; height: 1587px; overflow: hidden; }
+    .diagram-container { width: 2245px; height: 1587px; overflow-x: auto; }
+    svg { width: 2245px; height: 1587px; min-width: 1280px; display: block; }
+    .t-title { font: 400 44px 'Instrument Serif', 'Noto Serif TC', serif; letter-spacing: -0.01em; }
+    .t-eyebrow { font: 500 13px 'Geist', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-name { font: 600 16px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-sub  { font: 400 12px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-mono { font: 400 12px 'Geist Mono', ui-monospace, monospace; }
+    .t-tag  { font: 500 8px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.08em; }
+    .t-lbl  { font: 500 12px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-callout { font: italic 400 16px 'Instrument Serif', 'Noto Serif TC', serif; }
+  </style>
+</head>
+<body>
+<div class="diagram-container">
+<svg viewBox="0 0 1280 904" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-loop-title lite-loop-desc">
+<title id="lite-loop-title">Filee Lite 閉環流程圖</title>
+<desc id="lite-loop-desc">上游 Filee 出新版時，update.py 查到新 tag、寫差異報告、換上補丁、重編上游、以官方 Portable 為底組裝並編 Rust 外殼、自我檢查後產出安裝檔；補丁衝突時停下由人修，報告列出外殼要跟的改動時由人移植 shell 後重建。</desc>
+<defs>
+<marker id="lite-loop-arr-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>
+<marker id="lite-loop-arr-proc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3949ab"/></marker>
+<marker id="lite-loop-arr-check" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf9222"/></marker>
+<marker id="lite-loop-arr-data" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#00897b"/></marker>
+<marker id="lite-loop-arr-human" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#8e24aa"/></marker>
+<marker id="lite-loop-arr-fail" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#e53935"/></marker>
+</defs>
+
+<!-- 背景與標題 -->
+<rect width="100%" height="100%" fill="#f4f7fb"/>
+<text x="40" y="56" class="t-eyebrow" fill="#44506b">流程圖 · Filee Lite 的閉環（python 工具/update.py）</text>
+<text x="40" y="112" class="t-title" fill="#14213d">上游出新版，一條指令走到新的安裝檔</text>
+
+<!-- 連線（在節點之前） -->
+<!-- A → B -->
+<line x1="304" y1="280" x2="366" y2="280" stroke="#2196f3" stroke-width="1.2" marker-end="url(#lite-loop-arr-in)"/>
+<!-- B → C -->
+<line x1="608" y1="280" x2="670" y2="280" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-loop-arr-proc)"/>
+<!-- C → D -->
+<line x1="912" y1="280" x2="974" y2="280" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-loop-arr-proc)"/>
+<!-- D → E -->
+<line x1="1096" y1="328" x2="1096" y2="470" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-loop-arr-proc)"/>
+<!-- E → F -->
+<line x1="976" y1="520" x2="914" y2="520" stroke="#bf9222" stroke-width="1.2" marker-end="url(#lite-loop-arr-check)"/>
+<!-- B → X（衝突） -->
+<line x1="488" y1="328" x2="488" y2="470" stroke="#e53935" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-loop-arr-fail)"/>
+<!-- A → R -->
+<line x1="184" y1="328" x2="184" y2="470" stroke="#2196f3" stroke-width="1.2" marker-end="url(#lite-loop-arr-in)"/>
+<!-- R → H -->
+<line x1="184" y1="568" x2="184" y2="678" stroke="#00897b" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-loop-arr-data)"/>
+<!-- H → C（--rebuild） -->
+<path d="M 560,720 H 632 Q 640,720 640,712 V 368 Q 640,360 648,360 H 692 Q 700,360 700,352 V 330" fill="none" stroke="#8e24aa" stroke-width="1.2" marker-end="url(#lite-loop-arr-human)"/>
+
+<!-- 連線標籤（遮罩在線外，留 8px） -->
+<rect x="312" y="252" width="48" height="16" rx="2" fill="#f4f7fb"/>
+<text x="336" y="264" class="t-lbl" fill="#1a75be" text-anchor="middle">新 tag</text>
+<rect x="612" y="252" width="56" height="16" rx="2" fill="#f4f7fb"/>
+<text x="640" y="264" class="t-lbl" fill="#3949ab" text-anchor="middle">補丁就位</text>
+<rect x="104" y="392" width="72" height="16" rx="2" fill="#f4f7fb"/>
+<text x="140" y="404" class="t-lbl" fill="#1a75be" text-anchor="middle">寫差異報告</text>
+<rect x="420" y="392" width="60" height="16" rx="2" fill="#f4f7fb"/>
+<text x="450" y="404" class="t-lbl" fill="#d33431" text-anchor="middle">套不上</text>
+<rect x="1104" y="392" width="64" height="16" rx="2" fill="#f4f7fb"/>
+<text x="1136" y="404" class="t-lbl" fill="#3949ab" text-anchor="middle">stage 好</text>
+<rect x="920" y="492" width="48" height="16" rx="2" fill="#f4f7fb"/>
+<text x="944" y="504" class="t-mono" fill="#8d6c19" text-anchor="middle">PASS</text>
+<rect x="192" y="616" width="148" height="16" rx="2" fill="#f4f7fb"/>
+<text x="266" y="628" class="t-lbl" fill="#007e71" text-anchor="middle">外殼有改（結束碼 2）</text>
+<rect x="648" y="608" width="72" height="16" rx="2" fill="#f4f7fb"/>
+<text x="684" y="620" class="t-mono" fill="#8e24aa" text-anchor="middle">--rebuild</text>
+
+<!-- 節點 A：查新版（輸入，藍） -->
+<rect x="64" y="232" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="64" y="232" width="240" height="96" rx="6" fill="#c1e0f9" stroke="#2196f3" stroke-width="1.2"/>
+<rect x="72" y="238" width="24" height="12" rx="2" fill="none" stroke="#2196f3" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="84" y="247" class="t-tag" fill="#1663a0" text-anchor="middle">1</text>
+<text x="184" y="272" class="t-name" fill="#14213d" text-anchor="middle">查新版・抓 tag</text>
+<text x="184" y="292" class="t-mono" fill="#44506b" text-anchor="middle">GitHub releases/latest</text>
+<text x="184" y="312" class="t-sub" fill="#44506b" text-anchor="middle">一天最多問一次・不取建置腳本</text>
+
+<!-- 節點 B：換補丁（處理，靛） -->
+<rect x="368" y="232" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="368" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="376" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="388" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">2</text>
+<text x="488" y="272" class="t-name" fill="#14213d" text-anchor="middle">換補丁</text>
+<text x="488" y="292" class="t-mono" fill="#44506b" text-anchor="middle">git apply --3way</text>
+<text x="488" y="312" class="t-sub" fill="#44506b" text-anchor="middle">hosted.patch：4 個檔 +117／−9</text>
+
+<!-- 節點 C：編上游（處理，靛） -->
+<rect x="672" y="232" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="672" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="680" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="692" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">3</text>
+<text x="792" y="272" class="t-name" fill="#14213d" text-anchor="middle">編上游</text>
+<text x="792" y="292" class="t-mono" fill="#44506b" text-anchor="middle">dotnet publish ReadyToRun</text>
+<text x="792" y="312" class="t-sub" fill="#44506b" text-anchor="middle">字型從腳本解析・SHA-256 驗證</text>
+
+<!-- 節點 D：組裝（處理，靛） -->
+<rect x="976" y="232" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="976" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="984" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="996" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">4</text>
+<text x="1096" y="272" class="t-name" fill="#14213d" text-anchor="middle">組裝</text>
+<text x="1096" y="292" class="t-mono" fill="#44506b" text-anchor="middle">Portable.zip ＋ Filee.dll</text>
+<text x="1096" y="312" class="t-sub" fill="#44506b" text-anchor="middle">官方 SHA256SUMS・cargo build</text>
+
+<!-- 節點 E：自我檢查（檢查，黃） -->
+<rect x="976" y="472" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="976" y="472" width="240" height="96" rx="6" fill="#f6eaca" stroke="#d8a527" stroke-width="1.2"/>
+<rect x="984" y="478" width="24" height="12" rx="2" fill="none" stroke="#d8a527" stroke-opacity="0.8" stroke-width="0.8"/>
+<text x="996" y="487" class="t-tag" fill="#836417" text-anchor="middle">5</text>
+<text x="1096" y="512" class="t-name" fill="#14213d" text-anchor="middle">自我檢查</text>
+<text x="1096" y="532" class="t-mono" fill="#44506b" text-anchor="middle">cargo test · --selftest</text>
+<text x="1096" y="552" class="t-sub" fill="#44506b" text-anchor="middle">真的轉一次 SVG→PNG（複本資料）</text>
+
+<!-- 節點 F：安裝檔（焦點，橘） -->
+<rect x="672" y="472" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="672" y="472" width="240" height="96" rx="6" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1.6"/>
+<rect x="680" y="478" width="24" height="12" rx="2" fill="none" stroke="#fb8c00" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="692" y="487" class="t-tag" fill="#925100" text-anchor="middle">6</text>
+<text x="792" y="512" class="t-name" fill="#14213d" text-anchor="middle">新的安裝檔</text>
+<text x="792" y="532" class="t-mono" fill="#44506b" text-anchor="middle">dist\FileeLite-&lt;版&gt;-Setup.exe</text>
+<text x="792" y="552" class="t-sub" fill="#44506b" text-anchor="middle">帶去別台・裝給目前使用者</text>
+
+<!-- 節點 X：衝突停下（失敗，紅） -->
+<rect x="368" y="472" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="368" y="472" width="240" height="96" rx="6" fill="#f0c9cb" stroke="#e53935" stroke-width="1.2"/>
+<rect x="376" y="478" width="32" height="12" rx="2" fill="none" stroke="#e53935" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="392" y="487" class="t-tag" fill="#a92a27" text-anchor="middle">STOP</text>
+<text x="488" y="512" class="t-name" fill="#14213d" text-anchor="middle">停下：人修補丁</text>
+<text x="488" y="532" class="t-mono" fill="#44506b" text-anchor="middle">git diff &gt; hosted.patch</text>
+<text x="488" y="552" class="t-sub" fill="#44506b" text-anchor="middle">修好後 --rebuild 接回第 3 步</text>
+
+<!-- 節點 R：差異報告（資料，青） -->
+<rect x="64" y="472" width="240" height="96" rx="6" fill="#f4f7fb"/>
+<rect x="64" y="472" width="240" height="96" rx="6" fill="#b9dddc" stroke="#00897b" stroke-width="1.2"/>
+<rect x="72" y="478" width="40" height="12" rx="2" fill="none" stroke="#00897b" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="92" y="487" class="t-tag" fill="#00685d" text-anchor="middle">REPORT</text>
+<text x="184" y="512" class="t-name" fill="#14213d" text-anchor="middle">差異報告</text>
+<text x="184" y="532" class="t-mono" fill="#44506b" text-anchor="middle">docs\upstream-diffs\</text>
+<text x="184" y="552" class="t-sub" fill="#44506b" text-anchor="middle">外殼要跟／補丁碰到／自動跟上</text>
+
+<!-- 節點 H：人移植外殼（交接，紫） -->
+<rect x="64" y="680" width="496" height="80" rx="6" fill="#f4f7fb"/>
+<rect x="64" y="680" width="496" height="80" rx="6" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1.2"/>
+<rect x="72" y="686" width="40" height="12" rx="2" fill="none" stroke="#8e24aa" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="92" y="695" class="t-tag" fill="#8b23a7" text-anchor="middle">HUMAN</text>
+<text x="312" y="718" class="t-name" fill="#14213d" text-anchor="middle">照報告第 1 節把改動搬進 shell/</text>
+<text x="312" y="740" class="t-sub" fill="#44506b" text-anchor="middle">只看列出的上游檔（觸發、選單、通知、資料格式、CLI 輸出）・cargo test</text>
+
+<!-- 說明 -->
+<text x="976" y="640" class="t-callout" fill="#44506b">報告第 1 節是空的 → 結束碼 0，</text>
+<text x="976" y="664" class="t-callout" fill="#44506b">安裝檔直接帶走；引擎、工具視窗、</text>
+<text x="976" y="688" class="t-callout" fill="#44506b">翻譯的改進都已經在裡面。</text>
+
+<!-- 圖例 -->
+<line x1="40" y1="796" x2="1240" y2="796" stroke="#44506b" stroke-opacity="0.25" stroke-width="0.8"/>
+<text x="40" y="828" class="t-lbl" fill="#44506b">圖例</text>
+<rect x="88" y="818" width="14" height="10" rx="2" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1"/>
+<text x="110" y="828" class="t-sub" fill="#44506b">產出（焦點）</text>
+<rect x="200" y="818" width="14" height="10" rx="2" fill="#c1e0f9" stroke="#2196f3" stroke-width="1"/>
+<text x="222" y="828" class="t-sub" fill="#44506b">起點</text>
+<rect x="268" y="818" width="14" height="10" rx="2" fill="#c7cde8" stroke="#3949ab" stroke-width="1"/>
+<text x="290" y="828" class="t-sub" fill="#44506b">自動步驟</text>
+<rect x="364" y="818" width="14" height="10" rx="2" fill="#f6eaca" stroke="#d8a527" stroke-width="1"/>
+<text x="386" y="828" class="t-sub" fill="#44506b">檢查</text>
+<rect x="432" y="818" width="14" height="10" rx="2" fill="#b9dddc" stroke="#00897b" stroke-width="1"/>
+<text x="454" y="828" class="t-sub" fill="#44506b">報告</text>
+<rect x="500" y="818" width="14" height="10" rx="2" fill="#f0c9cb" stroke="#e53935" stroke-width="1"/>
+<text x="522" y="828" class="t-sub" fill="#44506b">停下</text>
+<rect x="568" y="818" width="14" height="10" rx="2" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1"/>
+<text x="590" y="828" class="t-sub" fill="#44506b">要人做的</text>
+<line x1="676" y1="823" x2="704" y2="823" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-loop-arr-proc)"/>
+<text x="712" y="828" class="t-sub" fill="#44506b">每次都走（線色同起點）</text>
+<line x1="868" y1="823" x2="896" y2="823" stroke="#e53935" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-loop-arr-fail)"/>
+<text x="904" y="828" class="t-sub" fill="#44506b">只在有狀況時才走</text>
+</svg>
+</div>
+</body>
+</html>

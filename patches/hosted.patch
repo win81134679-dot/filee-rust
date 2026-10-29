@@ -1,0 +1,1065 @@
+diff --git a/src/Filee.App/App.axaml.cs b/src/Filee.App/App.axaml.cs
+index 6888738..7b6d81d 100644
+--- a/src/Filee.App/App.axaml.cs
++++ b/src/Filee.App/App.axaml.cs
+@@ -120,8 +120,10 @@ private void Start(IClassicDesktopStyleApplicationLifetime desktop)
+                 _selectionPending = false;
+             }
+         };
+-        triggers.Start();
+-        log.LogInformation("Filee {Version} started", UpdateService.CurrentVersion);
++        var hosted = Program.Options.Hosted; // Filee Lite: filee-lite.exe owns the hook, tray, watch folders and integration
++        if (!hosted)
++            triggers.Start();
++        log.LogInformation("Filee {Version} started{Hosted}", UpdateService.CurrentVersion, hosted ? " (hosted by Filee Lite)" : "");
+         // Which way the transparent windows (donut, toast) are drawn, for reports of one that isn't see-through (#269).
+         if (OperatingSystem.IsWindows())
+         {
+@@ -145,10 +147,14 @@ private void Start(IClassicDesktopStyleApplicationLifetime desktop)
+ 
+         store.SettingsChanged += (_, _) => ApplySettings(store.Settings);
+ 
+-        AppHost.Get<TrayService>().Create(this);
++        if (!hosted)
++            AppHost.Get<TrayService>().Create(this);
+         AppHost.Get<WindowService>().EnsureToast();
+         AppHost.Get<ConversionService>().FeedbackDue += (_, _) => AppHost.Get<WindowService>().ShowFeedbackNotice();
+-        AppHost.Get<WatchFolderService>().Start();
++        if (!hosted)
++            AppHost.Get<WatchFolderService>().Start();
++        else
++            ExitWhenIdle(desktop);
+         // Originals of files from a browser that a crash kept from being deleted ("Save only the converted file").
+         _ = Task.Run(() => Filee.Core.Web.WebDrop.DeleteStale(Filee.Core.Web.WebDrop.DefaultWorkRoot, TimeSpan.FromDays(1)));
+         // Likewise the work folders of conversions that never got to clean up after themselves.
+@@ -195,7 +201,8 @@ private void Start(IClassicDesktopStyleApplicationLifetime desktop)
+                             log.LogWarning("Could not restore the macOS Dock visibility policy after reopening Filee");
+                     });
+             };
+-        WatchForUpdates(store);
++        if (!hosted)
++            WatchForUpdates(store);
+         // Filee runs as administrator while Explorer doesn't (an installer started "as administrator" started it):
+         // say so once, next to the tray, and on the Home page for as long as it lasts.
+         if (AppHost.Get<ElevationService>().ShellCannotReachFilee)
+@@ -288,7 +295,35 @@ private static void ApplySettings(AppSettings settings)
+             AppHost.Get<ConverterCatalog>().Refresh();
+             AppHost.Get<EngineDownloadService>().RefreshStatus();
+         }
+-        AppHost.Get<SystemIntegrationService>().Apply(settings);
++        if (!Program.Options.Hosted)
++            AppHost.Get<SystemIntegrationService>().Apply(settings);
++    }
++
++    /// <summary>
++    /// Filee Lite: a hosted Filee ends itself once no window is visible, no job is queued or running and no hosted
++    /// request (merge order, save dialog) is pending, twice in a row, after a grace period for the first window.
++    /// </summary>
++    private static void ExitWhenIdle(IClassicDesktopStyleApplicationLifetime desktop)
++    {
++        var idleTicks = 0;
++        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
++        var started = DateTime.UtcNow;
++        timer.Tick += (_, _) =>
++        {
++            if (DateTime.UtcNow - started < TimeSpan.FromSeconds(6))
++                return;
++            var busy = desktop.Windows.Any(w => w.IsVisible)
++                       || AppHost.Get<ConversionService>().Jobs.Any(j => j.IsRunning)
++                       || RadialController.HostedPending > 0;
++            idleTicks = busy ? 0 : idleTicks + 1;
++            if (idleTicks >= 2)
++            {
++                timer.Stop();
++                AppHost.Get<ILogger<App>>().LogInformation("Hosted Filee is idle: exiting");
++                desktop.Shutdown();
++            }
++        };
++        timer.Start();
+     }
+ 
+     private void HandleCommandLine(CommandLine options, bool firstLaunch = false, bool forwarded = false)
+@@ -306,6 +341,13 @@ private void HandleCommandLine(CommandLine options, bool firstLaunch = false, bo
+         }
+         // The Windows 11 Explorer menu hands over huge selections in a temp file; its paths are in ConvertFiles now.
+         options.DeleteListFile();
++        if (options.RunPreset is { } runPreset)
++        {
++            // Filee Lite: the donut slice was picked in filee-lite.exe; run it here as a drop on it would.
++            if (options.ConvertFiles.Count > 0)
++                AppHost.Get<RadialController>().RunHosted(runPreset, options.ConvertFiles);
++            return;
++        }
+         if (options.ConvertFiles.Count > 0)
+         {
+             // Explorer may start one process per selected file: collect them for a moment, then open once.
+diff --git a/src/Filee.App/Assets/i18n/en.json b/src/Filee.App/Assets/i18n/en.json
+index 5d09bbf..6e0e5ab 100644
+--- a/src/Filee.App/Assets/i18n/en.json
++++ b/src/Filee.App/Assets/i18n/en.json
+@@ -217,6 +217,7 @@
+   "engine.vision.description": "Recognizes the text of scans and pictures with macOS's own text recognition (OCR): searchable PDF, DOCX, TXT. Nothing to download.",
+   "engine.calibre.description": "Rare e-book formats (LIT, LRF, CHM, PDB, RB…) and Kindle output (MOBI, AZW3).\nAbove the HWPX writer, it also makes the PDFs of e-books (much faster for long books).",
+   "engine.libreoffice.description": "Reads older and less common formats: DOC, PPT, Pages, Keynote, Numbers, WordPerfect, ClarisWorks, Publisher, Visio…\nAlso saves as DOC, XLS, PPT, ODT, ODP, OpenDocument templates and EMF.",
++  "engine.msoffice.description": "Converts Word, Excel and PowerPoint files (DOCX, DOC, RTF, ODT, XLSX, XLS, CSV, PPTX, PPT, ODP) to PDF and between their formats with the Microsoft Office installed on this PC. Used first when it converted a test file here; anything it cannot convert goes to LibreOffice.",
+ 
+   "profile.images": "Images",
+   "profile.pdf": "PDF",
+diff --git a/src/Filee.App/Assets/i18n/zh-TW.json b/src/Filee.App/Assets/i18n/zh-TW.json
+index 5d55510..5450c8b 100644
+--- a/src/Filee.App/Assets/i18n/zh-TW.json
++++ b/src/Filee.App/Assets/i18n/zh-TW.json
+@@ -217,6 +217,7 @@
+   "engine.vision.description": "使用 macOS 內建的文字辨識來辨識掃描檔和圖片中的文字（OCR）：可搜尋的 PDF、DOCX、TXT。不需要下載。",
+   "engine.calibre.description": "少見的電子書格式（LIT、LRF、CHM、PDB、RB…）以及 Kindle 輸出（MOBI、AZW3）。\n排在 HWPX writer 之上時，也由它把電子書轉為 PDF（長書快得多）。",
+   "engine.libreoffice.description": "讀取較舊或少見的格式，如 DOC、PPT、Pages、Keynote、Numbers、WordPerfect、ClarisWorks、Publisher、Visio。\n也能儲存為 DOC、XLS、PPT、ODT、ODP、OpenDocument 範本或 EMF。",
++  "engine.msoffice.description": "用這台電腦裝的 Microsoft Office 把 Word、Excel、PowerPoint 檔（DOCX、DOC、RTF、ODT、XLSX、XLS、CSV、PPTX、PPT、ODP）轉成 PDF 或彼此互轉。在這台實際試轉成功才會優先使用；它轉不了的檔改由 LibreOffice 轉。",
+ 
+   "profile.images": "圖片",
+   "profile.pdf": "PDF",
+diff --git a/src/Filee.App/Program.cs b/src/Filee.App/Program.cs
+index 50e1fde..1217e28 100644
+--- a/src/Filee.App/Program.cs
++++ b/src/Filee.App/Program.cs
+@@ -11,6 +11,7 @@
+ using Avalonia.Controls;
+ using Avalonia.Media;
+ using Filee.App.Services;
++using Filee.Engines.Infrastructure;
+ using Filee.Core.Platform;
+ using Filee.Core.Settings;
+ using Microsoft.Extensions.Logging;
+@@ -51,6 +52,10 @@ public static int Main(string[] args)
+         PreloadedStore = null;
+         Log = StartupDiagnostics.CreateEarlyLogger(Path.Combine(UserDataStore.DefaultDirectory, "logs"), out var earlyStoreLogger);
+         StartupDiagnostics.LogUnhandledExceptions(Log);
++        if (Options.Hosted && Options.UpdateEngines is { } updateEngines) // Filee Lite: weekly, no window and no lock
++            return FileeLiteEngineUpdate.Run(updateEngines, Log);
++        if (Options.Hosted && Options.SeedData) // Filee Lite: first run on a new computer, no window and no lock
++            return FileeLiteSeedData.Run(Log);
+         Elevation = Filee.Platform.Windows.Elevation.Probe();
+         var startup = StartupDiagnostics.Describe(UpdateService.CurrentVersion, Environment.ProcessPath,
+             StartupDiagnostics.InstallKind(UpdateService.IsInstalled, UpdateService.IsReleaseBuild), Elevation,
+@@ -307,3 +312,205 @@ public static AppBuilder BuildAvaloniaApp()
+ internal sealed class FileeFontCollection() : Avalonia.Media.Fonts.EmbeddedFontCollection(
+     new Uri("fonts:Filee", UriKind.Absolute),
+     new Uri("avares://Filee/Assets/Fonts", UriKind.Absolute));
++
++/// <summary>
++/// Filee Lite (<c>Filee.exe --hosted --update-engines[=ids]</c>, started weekly by filee-lite.exe, no window): brings
++/// the engines Filee downloaded, and the 7-Zip next to Filee.exe, up to the newest pinned version. The pins are this
++/// build's engines.json, or the latest Filee release's where that one is newer and comes from the same publisher (same
++/// host; same owner/repo on github.com, same channel on conda.anaconda.org). Every download is SHA-256 checked by
++/// EngineInstaller as usual. Packages in <c>ids</c> are installed when missing. Exit code 0 = up to date, 1 = a
++/// package failed (filee-lite.exe tries again the next day). One line per package on standard output.
++/// FILEE_LITE_ENGINES_DIR (tests) puts both engine folders there.
++/// </summary>
++/// <summary>
++/// Filee Lite: upstream keeps its built-in library in memory until something is saved, so on a computer where Filee
++/// never ran there is no presets.json / profiles.json and filee-lite.exe (which reads the files) would show an empty
++/// donut. This writes upstream's own defaults, in upstream's own format, only for the files that are missing.
++/// </summary>
++internal static class FileeLiteSeedData
++{
++    public static int Run(ILogger log)
++    {
++        try
++        {
++            var store = new UserDataStore(UserDataStore.DefaultDirectory);
++            if (File.Exists(Path.Combine(store.Directory, "presets.json")) && File.Exists(Path.Combine(store.Directory, "profiles.json")))
++            {
++                Console.WriteLine("present");
++                return 0;
++            }
++            store.Load();
++            store.SaveLibrary();
++            Console.WriteLine($"seeded {store.Presets.Count} presets, {store.Profiles.Count} profiles");
++            return 0;
++        }
++        catch (Exception ex)
++        {
++            log.LogWarning(ex, "Filee Lite could not write the default library");
++            Console.WriteLine($"failed: {ex.Message}");
++            return 1;
++        }
++    }
++}
++
++internal static class FileeLiteEngineUpdate
++{
++    private const string LatestRelease = "https://api.github.com/repos/KnifeLemon/Filee/releases/latest";
++    private const string ManifestAt = "https://raw.githubusercontent.com/KnifeLemon/Filee/{0}/src/Filee.Engines/Infrastructure/engines.json";
++
++    public static int Run(IReadOnlyList<string> install, ILogger log)
++    {
++        try
++        {
++            return RunAsync(install, log).GetAwaiter().GetResult();
++        }
++        catch (Exception ex)
++        {
++            log.LogWarning(ex, "Filee Lite engine update failed");
++            Console.WriteLine($"failed: {ex.Message}");
++            return 1;
++        }
++    }
++
++    private static async Task<int> RunAsync(IReadOnlyList<string> install, ILogger log)
++    {
++        var testRoot = Environment.GetEnvironmentVariable("FILEE_LITE_ENGINES_DIR");
++        var downloadRoot = string.IsNullOrWhiteSpace(testRoot) ? EngineEnvironment.DownloadRoot : testRoot;
++        var bundledRoot = string.IsNullOrWhiteSpace(testRoot) ? Path.Combine(AppContext.BaseDirectory, "engines") : testRoot;
++        // Redirects are followed by the installer (mirrors may use plain HTTP; files are verified by SHA-256).
++        using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
++        http.DefaultRequestHeaders.UserAgent.ParseAdd($"Filee/{typeof(Program).Assembly.GetName().Version} FileeLite");
++
++        var built = EngineDownloads.Components;
++        var pins = new Dictionary<string, EngineComponent>(built);
++        foreach (var newer in await NewerPinsAsync(http, built, log))
++        {
++            pins[newer.Id] = newer;
++            Console.WriteLine($"pin {newer.Id} {built[newer.Id].Version} -> {newer.Version}");
++        }
++
++        var failed = 0;
++        async Task Update(EngineInstaller installer, EnginePackage package)
++        {
++            try
++            {
++                await installer.InstallAsync(package, null, CancellationToken.None);
++                Console.WriteLine($"updated {package.Id} {string.Join(" ", package.Components.Select(c => pins[c].Version))}");
++            }
++            catch (Exception ex) when (ex is not OutOfMemoryException)
++            {
++                failed++;
++                log.LogWarning(ex, "Filee Lite engine update: {Package} failed", package.Id);
++                Console.WriteLine($"failed {package.Id}: {ex.Message}");
++            }
++        }
++
++        var downloaded = new EngineInstaller(http, downloadRoot, pins, log);
++        foreach (var package in EngineDownloads.Packages.Where(EngineDownloads.CanDownload))
++        {
++            var present = downloaded.IsInstalled(package);
++            if (present ? downloaded.IsUpToDate(package) : !install.Contains(package.Id))
++            {
++                Console.WriteLine(present ? $"current {package.Id}" : $"absent {package.Id}");
++                continue;
++            }
++            await Update(downloaded, package);
++        }
++
++        // 7-Zip opens untrusted archives and disc images, so it is kept current too. The copy shipped next to
++        // Filee.exe has no marker: it is the version this build pins.
++        var sevenZip = new EnginePackage("7zip", ["7zip"], 0, ["archive"]);
++        var bundled = new EngineInstaller(http, bundledRoot, pins, log);
++        var shipped = Directory.Exists(Path.Combine(bundledRoot, "7zip"));
++        var stale = bundled.IsInstalled(sevenZip) ? !bundled.IsUpToDate(sevenZip)
++            : shipped ? !string.Equals(pins["7zip"].Sha256, built["7zip"].Sha256, StringComparison.OrdinalIgnoreCase)
++            : install.Contains("7zip");
++        if (stale && shipped && !Writable(bundledRoot))
++            // Installed for all users (Program Files): it is updated with Filee Lite itself.
++            Console.WriteLine($"read-only 7zip {pins["7zip"].Version} (installed for all users; reinstall Filee Lite to update it)");
++        else if (stale)
++            await Update(bundled, sevenZip);
++        else
++            Console.WriteLine(shipped ? "current 7zip" : "absent 7zip");
++
++        log.LogInformation("Filee Lite engine update done, {Failed} failed", failed);
++        return failed == 0 ? 0 : 1;
++    }
++
++    private static bool Writable(string folder)
++    {
++        try
++        {
++            var probe = Path.Combine(folder, $".filee-write-{Environment.ProcessId}");
++            File.WriteAllText(probe, "");
++            File.Delete(probe);
++            return true;
++        }
++        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
++        {
++            return false;
++        }
++    }
++
++    /// <summary>Pins of the latest Filee release that are newer than <paramref name="built"/> and trusted.</summary>
++    private static async Task<List<EngineComponent>> NewerPinsAsync(HttpClient http, IReadOnlyDictionary<string, EngineComponent> built, ILogger log)
++    {
++        var newer = new List<EngineComponent>();
++        try
++        {
++            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
++            using var release = System.Text.Json.JsonDocument.Parse(await http.GetStringAsync(LatestRelease, cts.Token));
++            var tag = release.RootElement.GetProperty("tag_name").GetString() ?? "";
++            if (tag.Length is 0 or > 40 || !tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_'))
++                return newer;
++            using var manifest = System.Text.Json.JsonDocument.Parse(await http.GetStringAsync(string.Format(ManifestAt, tag), cts.Token));
++            foreach (var p in manifest.RootElement.GetProperty("components").EnumerateObject())
++            {
++                if (!built.TryGetValue(p.Name, out var pin))
++                    continue;
++                var candidate = new EngineComponent(p.Name, p.Value.GetProperty("version").GetString() ?? "",
++                    p.Value.GetProperty("url").GetString() ?? "", p.Value.GetProperty("sha256").GetString() ?? "",
++                    p.Value.GetProperty("size").GetInt64(), p.Value.GetProperty("kind").GetString() ?? "");
++                if (IsTrustedNewer(pin, candidate))
++                    newer.Add(candidate);
++            }
++            Console.WriteLine($"manifest {tag}");
++        }
++        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException
++                                       or KeyNotFoundException or InvalidOperationException or FormatException)
++        {
++            log.LogInformation("Filee Lite engine update: latest pins unavailable ({Error}); using this build's", ex.Message);
++            Console.WriteLine($"manifest unavailable: {ex.Message}");
++        }
++        return newer;
++    }
++
++    internal static bool IsTrustedNewer(EngineComponent pin, EngineComponent candidate)
++    {
++        if (candidate.Kind != pin.Kind || candidate.Size is <= 0 or > 2_000_000_000
++            || candidate.Sha256.Length != 64 || !candidate.Sha256.All(char.IsAsciiHexDigit)
++            || !Uri.TryCreate(candidate.Url, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps
++            || !Uri.TryCreate(pin.Url, UriKind.Absolute, out var old) || !url.Host.Equals(old.Host, StringComparison.OrdinalIgnoreCase))
++            return false;
++        // The publisher on a shared host: github.com/<owner>/<repo>/, conda.anaconda.org/<channel>/ (Segments[0] is "/").
++        var publisher = old.Host.ToLowerInvariant() switch { "github.com" => 2, "conda.anaconda.org" => 1, _ => 0 };
++        if (!url.Segments.Take(publisher + 1).SequenceEqual(old.Segments.Take(publisher + 1), StringComparer.OrdinalIgnoreCase))
++            return false;
++        return CompareVersions(candidate.Version, pin.Version) > 0;
++    }
++
++    /// <summary>Compares the numbers in two version texts ("21.0.12.1", "5.4.0.20240606") one by one.</summary>
++    internal static int CompareVersions(string a, string b)
++    {
++        static long[] Numbers(string v) => System.Text.RegularExpressions.Regex.Matches(v, "[0-9]+")
++            .Select(m => long.TryParse(m.Value, out var n) ? n : 0).ToArray();
++        var (x, y) = (Numbers(a), Numbers(b));
++        for (var i = 0; i < Math.Max(x.Length, y.Length); i++)
++        {
++            var c = (i < x.Length ? x[i] : 0).CompareTo(i < y.Length ? y[i] : 0);
++            if (c != 0)
++                return c;
++        }
++        return 0;
++    }
++}
+diff --git a/src/Filee.App/Services/CommandLine.cs b/src/Filee.App/Services/CommandLine.cs
+index eb17faa..9713dfc 100644
+--- a/src/Filee.App/Services/CommandLine.cs
++++ b/src/Filee.App/Services/CommandLine.cs
+@@ -41,8 +41,20 @@ public sealed record CommandLine(
+     bool? ContextMenu = null,
+     string? Language = null,
+     bool WhatsNew = false,
+-    string? UpdatedFrom = null)
++    string? UpdatedFrom = null,
++    bool Hosted = false,
++    string? RunPreset = null,
++    IReadOnlyList<string>? UpdateEngines = null,
++    bool SeedData = false)
+ {
++    // Filee Lite (patches/hosted.patch):
++    //   Filee.exe --hosted ...             started by filee-lite.exe: no tray, no global hook, no watch folders, no
++    //                                      system integration or update checks; exits once no window or job is left
++    //   Filee.exe --hosted --run=<id> a b  run preset <id> on these files as a donut drop would (tools open their window)
++    //   Filee.exe --hosted --update-engines[=a,b]  bring Filee's engines up to date without a window (weekly, from
++    //                                      filee-lite.exe); the listed packages are installed when missing
++    //   Filee.exe --hosted --seed-data     write the built-in presets.json / profiles.json when they are missing
++    //                                      (a computer where Filee never ran), then exit without a window
+     /// <summary>File name prefix of list files written by FileeExplorerMenu.dll (LIST_PREFIX there) into %TEMP%.</summary>
+     public const string ListFilePrefix = "Filee-convert-";
+ 
+@@ -62,6 +74,10 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+         string? language = null;
+         var whatsNew = false;
+         string? updatedFrom = null;
++        var hosted = false;
++        string? runPreset = null;
++        List<string>? updateEngines = null;
++        var seedData = false;
+ 
+         foreach (var arg in args)
+         {
+@@ -110,6 +126,20 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+                 case "--convert-list":
+                     expectList = true;
+                     break;
++                case "--hosted":
++                    hosted = true;
++                    break;
++                case "--update-engines":
++                    updateEngines = (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
++                        .Select(id => id.ToLowerInvariant()).Distinct().ToList();
++                    break;
++                case "--seed-data":
++                    seedData = true;
++                    break;
++                case "--run" when !string.IsNullOrWhiteSpace(value):
++                    runPreset = value.Trim();
++                    collecting = true;
++                    break;
+                 default:
+                     // Ignore anything unknown that isn't a file (e.g. options of a newer version).
+                     if (collecting && !arg.StartsWith("--", StringComparison.Ordinal) && Exists(arg))
+@@ -117,7 +147,8 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+                     break;
+             }
+         }
+-        return new CommandLine(background, settings, files, listFile, quit, cleanup, engines, startWithWindows, contextMenu, language, whatsNew, updatedFrom);
++        return new CommandLine(background, settings, files, listFile, quit, cleanup, engines, startWithWindows, contextMenu, language, whatsNew, updatedFrom,
++            hosted, runPreset, updateEngines, seedData);
+     }
+ 
+     /// <summary>"--Name=Value" → ("--name", "Value"); "--name" → ("--name", null).</summary>
+diff --git a/src/Filee.App/Services/RadialController.cs b/src/Filee.App/Services/RadialController.cs
+index 943831e..ffa42a1 100644
+--- a/src/Filee.App/Services/RadialController.cs
++++ b/src/Filee.App/Services/RadialController.cs
+@@ -367,6 +367,55 @@ private void Convert(int index, int sub, IReadOnlyList<string> files, WebDrop? w
+         ShowProgress(job);
+     }
+ 
++    /// <summary>Filee Lite: hosted requests (merge order, save dialog) still waiting for the user.</summary>
++    public static int HostedPending => _hostedPending;
++
++    private static int _hostedPending;
++
++    /// <summary>
++    /// Filee Lite (<c>--hosted --run=&lt;id&gt;</c>): runs preset <paramref name="presetId"/> on <paramref name="files"/>
++    /// as a drop on its slice would, without a donut: a tool opens its window, a merge asks for the order, "Ask every
++    /// time" asks where to save, anything else converts with the toast.
++    /// </summary>
++    public void RunHosted(string presetId, IReadOnlyList<string> files)
++    {
++        if (store.FindPreset(presetId) is not { } preset || SourcesFor(preset, files) is not { Count: > 0 } sources)
++        {
++            log.LogWarning("Hosted run: preset {Preset} can't run on {Count} file(s)", presetId, files.Count);
++            return;
++        }
++        log.LogInformation("Hosted run of preset {Preset} on {Count} file(s)", preset.Id, sources.Count);
++        if (preset.IsTool)
++        {
++            windows.ShowTool(sources, preset, null);
++            return;
++        }
++        if ((preset.TargetFormat == "pdf" && preset.Pdf.MergeIntoSingle || preset.JoinsIntoOneMedia || preset.JoinsImages) && sources.Count > 1)
++        {
++            _ = Pending(MergeInOrderAsync(sources, preset.Clone(), null));
++            return;
++        }
++        if (preset.Output.AskEveryTime)
++        {
++            _ = Pending(AskThenConvertAsync(sources, preset));
++            return;
++        }
++        conversions.Start(sources, preset);
++    }
++
++    private static async Task Pending(Task task)
++    {
++        Interlocked.Increment(ref _hostedPending);
++        try
++        {
++            await task;
++        }
++        finally
++        {
++            Interlocked.Decrement(ref _hostedPending);
++        }
++    }
++
+     private async Task MergeInOrderAsync(IReadOnlyList<string> files, Preset preset, WebDrop? web)
+     {
+         try
+diff --git a/src/Filee.App/Services/SingleInstance.cs b/src/Filee.App/Services/SingleInstance.cs
+index 93a25df..a505284 100644
+--- a/src/Filee.App/Services/SingleInstance.cs
++++ b/src/Filee.App/Services/SingleInstance.cs
+@@ -11,7 +11,8 @@ namespace Filee.App.Services;
+ public sealed class SingleInstance : IDisposable
+ {
+     // string.GetHashCode() is randomized per process, so a stable hash is required for both processes to agree.
+-    internal static readonly string DefaultName = NameFor(Environment.UserName, UserDataStore.OverrideDirectory);
++    internal static readonly string DefaultName = NameFor(Environment.UserName, UserDataStore.OverrideDirectory)
++        + (Environment.GetCommandLineArgs().Any(a => a.Equals("--hosted", StringComparison.OrdinalIgnoreCase)) ? "-lite" : ""); // Filee Lite
+     private readonly Mutex _mutex;
+     private readonly string _name;
+     private readonly CancellationTokenSource _cts = new();
+diff --git a/src/Filee.Engines/EngineRegistry.cs b/src/Filee.Engines/EngineRegistry.cs
+index 5212f3c..6e50479 100644
+--- a/src/Filee.Engines/EngineRegistry.cs
++++ b/src/Filee.Engines/EngineRegistry.cs
+@@ -32,7 +32,7 @@ public static class EngineRegistry
+     /// <summary>
+     /// Instantiates all converters. Order only matters as a tie-breaker when no priority is set, so it mirrors
+     /// AppSettings.EnginePriority: built-in engines first, the optional downloads last. Software installed on the
+-    /// system (Microsoft Office, a system-wide LibreOffice) is never used.
++    /// system (a system-wide LibreOffice) is never used; Microsoft Office is (Filee Lite).
+     /// </summary>
+     /// <param name="loggers">
+     /// The app's log; FFmpeg writes which hardware encoders work and when one failed, LibreOffice when a file needed
+@@ -71,9 +71,16 @@ public static IReadOnlyList<IConverter> CreateAll(EngineEnvironment env, ILogger
+         new VisionConverter(), // before Tesseract: a Mac's OCR step (Tesseract reads the languages Vision doesn't)
+         new TesseractConverter(),
+         new CalibreConverter(),
+-        new LibreOfficeConverter(env, loggers?.CreateLogger<LibreOfficeConverter>()),
++        .. OfficeEngines(env, loggers), // Filee Lite: Microsoft Office first, LibreOffice behind it
+     ];
+ 
++    /// <summary>Filee Lite: Microsoft Office (when it converts on this PC) with LibreOffice as its fallback.</summary>
++    private static IConverter[] OfficeEngines(EngineEnvironment env, ILoggerFactory? loggers)
++    {
++        var libreOffice = new LibreOfficeConverter(env, loggers?.CreateLogger<LibreOfficeConverter>());
++        return [new MicrosoftOfficeConverter(libreOffice, loggers?.CreateLogger<MicrosoftOfficeConverter>()), libreOffice];
++    }
++
+     /// <summary>Finds the PDF merger among the converters.</summary>
+     public static IPdfMerger? FindPdfMerger(IEnumerable<IConverter> converters) =>
+         converters.OfType<IPdfMerger>().FirstOrDefault();
+diff --git a/src/Filee.Engines/Infrastructure/EngineInstaller.cs b/src/Filee.Engines/Infrastructure/EngineInstaller.cs
+index 90b5cf0..791a110 100644
+--- a/src/Filee.Engines/Infrastructure/EngineInstaller.cs
++++ b/src/Filee.Engines/Infrastructure/EngineInstaller.cs
+@@ -331,6 +331,18 @@ private static string MsiProgramFolder(string id, string staging)
+                           ?? throw new InvalidDataException("ebook-convert.exe not found in the calibre package.");
+             return Path.GetDirectoryName(convert)!;
+         }
++        if (id == "7zip") // Filee Lite: the weekly update replaces the bundled 7-Zip from its MSI
++        {
++            var sevenZip = Directory.EnumerateFiles(staging, "7z.exe", SearchOption.AllDirectories).FirstOrDefault()
++                           ?? throw new InvalidDataException("7z.exe not found in the 7-Zip package.");
++            // Only what the bundled copy has (the MSI also holds the file manager, the GUI and translations).
++            var trimmed = Path.Combine(staging, "~7z");
++            Directory.CreateDirectory(trimmed);
++            foreach (var name in new[] { "7z.exe", "7z.dll", "License.txt", "readme.txt" })
++                if (File.Exists(Path.Combine(Path.GetDirectoryName(sevenZip)!, name)))
++                    File.Copy(Path.Combine(Path.GetDirectoryName(sevenZip)!, name), Path.Combine(trimmed, name));
++            return trimmed;
++        }
+         var soffice = Directory.EnumerateFiles(staging, "soffice.exe", SearchOption.AllDirectories).FirstOrDefault()
+                       ?? throw new InvalidDataException("soffice.exe not found in the LibreOffice package.");
+         var libreOffice = Path.GetDirectoryName(Path.GetDirectoryName(soffice)!)!; // folder with program/, share/
+diff --git a/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs b/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs
+new file mode 100644
+index 0000000..3312d8e
+--- /dev/null
++++ b/src/Filee.Engines/Office/MicrosoftOfficeConverter.cs
+@@ -0,0 +1,515 @@
++// Filee Lite (patches/hosted.patch): Microsoft Office as the first choice for Office documents. Word, Excel and
++// PowerPoint are driven through their COM automation (the same as "Save As" / "Export to PDF" in the program). An
++// application only counts as installed after it really converted a small test file on this PC (an unlicensed,
++// half-installed or blocked Office does not), checked once per Office version and kept in
++// %LOCALAPPDATA%\Filee\msoffice-check.json. Anything Office fails on goes to LibreOffice instead.
++//
++// Safety: macros are disabled (AutomationSecurity = force disable), links are not updated, files open read-only,
++// password-protected files are refused instead of asking for a password, and a hung application is ended after a
++// time-out. A PowerPoint the user has open is shared (it is a single-instance server): only our presentation closes.
++// FILEE_MSOFFICE=off turns the engine off (tests, or a user who wants LibreOffice only).
++
++using System.Diagnostics;
++using System.Runtime.InteropServices;
++using System.Text.Json;
++using System.Text.Json.Nodes;
++using Filee.Core.Conversion;
++using Filee.Core.Formats;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Logging.Abstractions;
++
++namespace Filee.Engines.Office;
++
++public sealed class MicrosoftOfficeConverter : IConverter
++{
++    internal enum App { Word, Excel, PowerPoint }
++
++    private static readonly string[] WordSources = ["docx", "docm", "dotx", "doc", "dot", "rtf", "odt"];
++    private static readonly string[] WordTargets = ["docx", "doc", "rtf", "odt"];
++    private static readonly string[] ExcelSources = ["xlsx", "xlsm", "xls", "ods", "csv"];
++    private static readonly string[] ExcelTargets = ["xlsx", "xls", "ods", "csv"];
++    private static readonly string[] PowerPointSources = ["pptx", "pptm", "ppsx", "ppt", "odp"];
++    private static readonly string[] PowerPointTargets = ["pptx", "ppt", "odp"];
++
++    /// <summary>PDF: cheaper than every other route, LibreOffice's preferred slides included (it comes later in the list).</summary>
++    private const int PdfCost = 0;
++    /// <summary>Editable formats: cheaper than LibreOffice (25), dearer than the built-in engines where they can do it.</summary>
++    private const int SaveAsCost = 9;
++
++    private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(90);
++    private static readonly TimeSpan ConvertTimeout = TimeSpan.FromMinutes(5);
++    /// <summary>A failed check is tried again after this long (Office may have been activated since).</summary>
++    private static readonly TimeSpan RecheckFailed = TimeSpan.FromDays(1);
++    private const string NoPassword = "filee-none"; // deliberately wrong: a protected file fails instead of asking
++
++    private readonly IConverter? _fallback;
++    private readonly ILogger _logger;
++    private readonly SemaphoreSlim _oneAtATime = new(1, 1);
++    private Dictionary<App, string> _usable = [];
++
++    /// <param name="fallback">LibreOffice: takes over a file Office could not convert.</param>
++    public MicrosoftOfficeConverter(IConverter? fallback = null, ILogger? logger = null)
++    {
++        _fallback = fallback;
++        _logger = logger ?? NullLogger.Instance;
++    }
++
++    public string Id => "msoffice";
++    public string DisplayName => "Microsoft Office";
++    public int MaxParallelism => 1;
++    public IReadOnlyList<ConversionEdge> Edges { get; private set; } = [];
++
++    public EngineStatus GetStatus()
++    {
++        if (!OperatingSystem.IsWindows())
++            return EngineStatus.Unavailable("engine.reason.unsupported_platform");
++        if (string.Equals(Environment.GetEnvironmentVariable("FILEE_MSOFFICE"), "off", StringComparison.OrdinalIgnoreCase))
++        {
++            _usable = [];
++            Edges = [];
++            return EngineStatus.Unavailable("engine.reason.not_installed", "FILEE_MSOFFICE=off");
++        }
++        _usable = Detect();
++        Edges = BuildEdges(_usable.Keys);
++        if (_usable.Count == 0)
++            return EngineStatus.Unavailable("engine.reason.not_installed");
++        var version = _usable.Values.Select(FileVersion).FirstOrDefault(v => v is not null);
++        return EngineStatus.Available(string.Join(", ", _usable.Keys), version);
++    }
++
++    internal static List<ConversionEdge> BuildEdges(IEnumerable<App> apps)
++    {
++        var edges = new List<ConversionEdge>();
++        foreach (var app in apps)
++        {
++            var (sources, targets) = Formats(app);
++            foreach (var s in sources)
++            {
++                edges.Add(new ConversionEdge(s, "pdf", PdfCost));
++                foreach (var t in targets)
++                    if (t != s)
++                        edges.Add(new ConversionEdge(s, t, SaveAsCost));
++            }
++        }
++        return edges;
++    }
++
++    private static (string[] Sources, string[] Targets) Formats(App app) => app switch
++    {
++        App.Word => (WordSources, WordTargets),
++        App.Excel => (ExcelSources, ExcelTargets),
++        _ => (PowerPointSources, PowerPointTargets),
++    };
++
++    private static App? AppFor(string format) =>
++        WordSources.Contains(format) ? App.Word
++        : ExcelSources.Contains(format) ? App.Excel
++        : PowerPointSources.Contains(format) ? App.PowerPoint : null;
++
++    public async Task<IReadOnlyList<string>> ConvertAsync(ConversionStep step, IProgress<double>? progress, CancellationToken cancellationToken)
++    {
++        try
++        {
++            var app = AppFor(step.From) ?? throw new NotSupportedException($"Microsoft Office does not open {step.From}.");
++            if (step.To == "pdf" && step.Preset.Document.PdfA && app != App.Word)
++                throw new NotSupportedException($"{app} cannot write PDF/A.");
++            progress?.Report(0.1);
++            var outDir = Path.Combine(step.WorkDirectory, "mso-" + Guid.NewGuid().ToString("N")[..8]);
++            Directory.CreateDirectory(outDir);
++            var produced = Path.Combine(outDir, Path.GetFileNameWithoutExtension(step.InputPath) + "." + step.To);
++            await _oneAtATime.WaitAsync(cancellationToken);
++            try
++            {
++                await RunOnStaAsync(app, () => Convert(app, step.InputPath, produced, step.To, step.Preset.Document.PdfA),
++                    ConvertTimeout, cancellationToken);
++            }
++            finally
++            {
++                _oneAtATime.Release();
++            }
++            if (!File.Exists(produced) || new FileInfo(produced).Length == 0)
++                throw new InvalidOperationException($"{app} produced no output.");
++            var target = step.Output.Allocate(step.To);
++            if (target is null)
++                return [];
++            File.Move(produced, target, overwrite: true);
++            progress?.Report(1);
++            return [target];
++        }
++        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
++        {
++            if (_fallback is not null && _fallback.Edges.Any(e => e.From == step.From && e.To == step.To)
++                && _fallback.GetStatus().IsAvailable)
++            {
++                _logger.LogInformation("{File}: Microsoft Office could not convert it ({Error}); LibreOffice does",
++                    step.InputPath, ex.Message);
++                return await _fallback.ConvertAsync(step, progress, cancellationToken);
++            }
++            throw;
++        }
++    }
++
++    // ───────────────────────── Detection ─────────────────────────
++
++    private static string CheckFile => Path.Combine(
++        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Filee", "msoffice-check.json");
++
++    /// <summary>Applications that are installed and converted the test file, with their program.</summary>
++    private Dictionary<App, string> Detect()
++    {
++        var usable = new Dictionary<App, string>();
++        JsonObject cache;
++        try
++        {
++            cache = JsonNode.Parse(File.ReadAllText(CheckFile)) as JsonObject ?? [];
++        }
++        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
++        {
++            cache = [];
++        }
++        var changed = false;
++        foreach (var app in Enum.GetValues<App>())
++        {
++            var exe = RegisteredProgram(app);
++            if (exe is null)
++                continue;
++            var stamp = Stamp(exe);
++            var entry = cache[app.ToString()] as JsonObject;
++            var known = entry is not null && (string?)entry["stamp"] == stamp
++                        && (entry["ok"]?.GetValue<bool>() == true
++                            || DateTime.TryParse((string?)entry["checked"], null, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
++                               && DateTime.UtcNow - at < RecheckFailed);
++            bool ok;
++            if (known)
++                ok = entry!["ok"]!.GetValue<bool>();
++            else
++            {
++                string? error = null;
++                try
++                {
++                    ok = Check(app);
++                }
++                catch (Exception e)
++                {
++                    ok = false;
++                    error = e.Message;
++                }
++                _logger.LogInformation("Microsoft Office check: {App} {Result}{Error}", app, ok ? "converts" : "does not convert",
++                    error is null ? "" : $" ({error})");
++                cache[app.ToString()] = new JsonObject
++                {
++                    ["stamp"] = stamp, ["ok"] = ok, ["checked"] = DateTime.UtcNow.ToString("O"), ["error"] = error,
++                };
++                changed = true;
++            }
++            if (ok)
++                usable[app] = exe;
++        }
++        if (changed)
++        {
++            try
++            {
++                Directory.CreateDirectory(Path.GetDirectoryName(CheckFile)!);
++                File.WriteAllText(CheckFile, cache.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
++            }
++            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
++            {
++                _logger.LogInformation("Could not save {File}: {Error}", CheckFile, e.Message);
++            }
++        }
++        return usable;
++    }
++
++    /// <summary>One small file through the application, as a conversion would: true when the PDF comes out.</summary>
++    private bool Check(App app)
++    {
++        var folder = Path.Combine(Path.GetTempPath(), "filee-msoffice-" + Guid.NewGuid().ToString("N")[..8]);
++        Directory.CreateDirectory(folder);
++        try
++        {
++            var output = Path.Combine(folder, "check.pdf");
++            RunOnStaAsync(app, () => CheckOnSta(app, output), CheckTimeout, CancellationToken.None).GetAwaiter().GetResult();
++            return File.Exists(output) && new FileInfo(output).Length > 0;
++        }
++        finally
++        {
++            try
++            {
++                Directory.Delete(folder, recursive: true);
++            }
++            catch (IOException)
++            {
++            }
++        }
++    }
++
++    private static void CheckOnSta(App app, string pdf)
++    {
++        using var session = Session.Start(app);
++        dynamic office = session.Office;
++        switch (app)
++        {
++            case App.Word:
++                var doc = office.Documents.Add();
++                try
++                {
++                    doc.Content.Text = "Filee";
++                    doc.ExportAsFixedFormat(pdf, 17);
++                }
++                finally
++                {
++                    doc.Close(0);
++                }
++                break;
++            case App.Excel:
++                var book = office.Workbooks.Add();
++                try
++                {
++                    book.Worksheets[1].Range["A1"].Value2 = "Filee";
++                    book.ExportAsFixedFormat(0, pdf);
++                }
++                finally
++                {
++                    book.Close(false);
++                }
++                break;
++            default:
++                var deck = office.Presentations.Add(0);
++                try
++                {
++                    deck.Slides.Add(1, 12);
++                    deck.SaveAs(pdf, 32);
++                }
++                finally
++                {
++                    deck.Close();
++                }
++                break;
++        }
++    }
++
++    private static string? RegisteredProgram(App app)
++    {
++        if (!OperatingSystem.IsWindows())
++            return null;
++        using var progId = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(ProgId(app) + @"\CLSID");
++        if (progId?.GetValue(null) is not string clsid)
++            return null;
++        using var server = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey($@"CLSID\{clsid}\LocalServer32");
++        if (server?.GetValue(null) is not string command)
++            return null;
++        // "C:\...\WINWORD.EXE" /Automation, or unquoted with arguments.
++        var exe = command.StartsWith('"') ? command[1..command.IndexOf('"', 1)] : command.Split(" /")[0].Trim();
++        return File.Exists(exe) ? exe : null;
++    }
++
++    private static string ProgId(App app) => app switch
++    {
++        App.Word => "Word.Application",
++        App.Excel => "Excel.Application",
++        _ => "PowerPoint.Application",
++    };
++
++    private static string ProcessName(App app) => app switch
++    {
++        App.Word => "WINWORD",
++        App.Excel => "EXCEL",
++        _ => "POWERPNT",
++    };
++
++    private static string Stamp(string exe)
++    {
++        var info = new FileInfo(exe);
++        return $"{exe}|{FileVersion(exe)}|{info.LastWriteTimeUtc.Ticks}";
++    }
++
++    private static string? FileVersion(string exe)
++    {
++        try
++        {
++            return FileVersionInfo.GetVersionInfo(exe).FileVersion;
++        }
++        catch (FileNotFoundException)
++        {
++            return null;
++        }
++    }
++
++    // ───────────────────────── Conversion ─────────────────────────
++
++    private static void Convert(App app, string input, string output, string to, bool pdfA)
++    {
++        using var session = Session.Start(app);
++        dynamic office = session.Office;
++        var missing = System.Reflection.Missing.Value;
++        switch (app)
++        {
++            case App.Word:
++                // FileName, ConfirmConversions, ReadOnly, AddToRecentFiles, PasswordDocument, PasswordTemplate, Revert,
++                // WritePasswordDocument, WritePasswordTemplate, Format, Encoding, Visible: a wrong password makes a
++                // protected document fail at once instead of asking.
++                var doc = office.Documents.Open(input, false, true, false, NoPassword, NoPassword, false, missing, missing,
++                    missing, missing, false);
++                try
++                {
++                    if (to == "pdf")
++                        // OutputFileName, ExportFormat (PDF), OpenAfterExport, OptimizeFor (print), Range (all), From, To,
++                        // Item (content), IncludeDocProps, KeepIRM, CreateBookmarks (headings), DocStructureTags,
++                        // BitmapMissingFonts, UseISO19005_1 (PDF/A).
++                        doc.ExportAsFixedFormat(output, 17, false, 0, 0, 1, 1, 0, true, true, 1, true, true, pdfA);
++                    else
++                        doc.SaveAs2(output, to switch { "docx" => 12, "doc" => 0, "rtf" => 6, "odt" => 23, _ => throw Unsupported(app, to) });
++                }
++                finally
++                {
++                    doc.Close(0);
++                }
++                break;
++            case App.Excel:
++                // Filename, UpdateLinks (never), ReadOnly, Format, Password, WriteResPassword, IgnoreReadOnlyRecommended.
++                // No write-reservation password: Excel refuses to open any file with a wrong one (read-only needs none).
++                var book = office.Workbooks.Open(input, 0, true, missing, NoPassword, missing, true);
++                try
++                {
++                    if (to == "pdf")
++                        // Type (PDF), Filename, Quality (standard), IncludeDocProperties, IgnorePrintAreas.
++                        book.ExportAsFixedFormat(0, output, 0, true, false);
++                    else
++                        book.SaveAs(output, to switch { "xlsx" => 51, "xls" => 56, "ods" => 60, "csv" => 62, _ => throw Unsupported(app, to) });
++                }
++                finally
++                {
++                    book.Close(false);
++                }
++                break;
++            default:
++                // "file::password::" makes a protected presentation fail instead of asking. ReadOnly, Untitled, WithWindow.
++                var deck = office.Presentations.Open(input + "::" + NoPassword + "::", -1, 0, 0);
++                try
++                {
++                    deck.SaveAs(output, to switch { "pdf" => 32, "pptx" => 24, "ppt" => 1, "odp" => 35, _ => throw Unsupported(app, to) });
++                }
++                finally
++                {
++                    deck.Close();
++                }
++                break;
++        }
++    }
++
++    private static NotSupportedException Unsupported(App app, string to) => new($"{app} does not save {to} here.");
++
++    /// <summary>
++    /// Runs Office work on a thread of its own (COM wants a single-threaded apartment). When it does not end in time
++    /// the Office processes it started, hidden ones only, are ended.
++    /// </summary>
++    private static async Task RunOnStaAsync(App app, Action work, TimeSpan timeout, CancellationToken cancellationToken)
++    {
++        var name = ProcessName(app);
++        var before = Process.GetProcessesByName(name).Select(p => p.Id).ToHashSet();
++        var started = DateTime.Now;
++        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
++        var thread = new Thread(() =>
++        {
++            try
++            {
++                work();
++                done.TrySetResult();
++            }
++            catch (Exception e)
++            {
++                done.TrySetException(e);
++            }
++        }) { IsBackground = true, Name = "Microsoft Office" };
++        thread.SetApartmentState(ApartmentState.STA);
++        thread.Start();
++        try
++        {
++            await done.Task.WaitAsync(timeout, cancellationToken);
++        }
++        catch (Exception e) when (e is TimeoutException or OperationCanceledException)
++        {
++            foreach (var p in Process.GetProcessesByName(name))
++            {
++                try
++                {
++                    if (!before.Contains(p.Id) && p.StartTime >= started.AddSeconds(-1) && p.MainWindowHandle == IntPtr.Zero)
++                        p.Kill();
++                }
++                catch (Exception kill) when (kill is InvalidOperationException or System.ComponentModel.Win32Exception)
++                {
++                }
++            }
++            if (e is TimeoutException)
++                throw new TimeoutException($"Microsoft {app} did not finish within {timeout.TotalMinutes:0.#} minutes.");
++            throw;
++        }
++    }
++
++    /// <summary>One Office application for one piece of work: quiet, macros off; quit afterwards unless it was the user's.</summary>
++    private sealed class Session : IDisposable
++    {
++        public object Office { get; }
++        private readonly bool _quit;
++
++        private Session(object office, bool quit)
++        {
++            Office = office;
++            _quit = quit;
++        }
++
++        public static Session Start(App app)
++        {
++            // Word and Excel start a new instance for automation; PowerPoint joins the running one.
++            var shared = app == App.PowerPoint && Process.GetProcessesByName(ProcessName(app)).Length > 0;
++            var type = Type.GetTypeFromProgID(ProgId(app), throwOnError: true)!;
++            dynamic office = Activator.CreateInstance(type)!;
++            var session = new Session(office, quit: !shared);
++            try
++            {
++                switch (app)
++                {
++                    case App.Word:
++                        office.Visible = false;
++                        office.DisplayAlerts = 0; // wdAlertsNone
++                        office.AutomationSecurity = 3; // msoAutomationSecurityForceDisable
++                        break;
++                    case App.Excel:
++                        office.Visible = false;
++                        office.DisplayAlerts = false;
++                        office.AskToUpdateLinks = false;
++                        office.EnableEvents = false;
++                        office.AutomationSecurity = 3;
++                        break;
++                    default:
++                        office.DisplayAlerts = 1; // ppAlertsNone
++                        office.AutomationSecurity = 3;
++                        break;
++                }
++            }
++            catch
++            {
++                session.Dispose();
++                throw;
++            }
++            return session;
++        }
++
++        public void Dispose()
++        {
++            try
++            {
++                if (_quit)
++                    ((dynamic)Office).Quit();
++            }
++            catch (Exception e) when (e is COMException or InvalidComObjectException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
++            {
++            }
++            finally
++            {
++                if (OperatingSystem.IsWindows())
++                    Marshal.FinalReleaseComObject(Office);
++            }
++        }
++    }
++}

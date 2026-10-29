@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filee Lite 動態閉環流程圖</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --color-paper: #f4f7fb;
+      --color-ink: #14213d;
+      --color-muted: #44506b;
+      --color-soft: #56627c;
+      --color-accent: #fb8c00;
+      --color-rule: rgba(20,33,61,0.12);
+      --font-sans: 'Geist', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', 'Noto Serif TC', serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+      --motion-fast: 160ms;
+      --motion-step: 480ms;
+      --motion-hold: 1100ms;
+      --motion-total: 7700ms;
+      --motion-ease: cubic-bezier(.2,.8,.2,1);
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 48px 32px;
+      color: var(--color-ink);
+      background: var(--color-paper);
+      font-family: var(--font-sans);
+    }
+    main { display: grid; gap: 72px; justify-items: center; }
+    [data-motion-root] { width: min(100%, 1320px); max-width: 100%; min-width: 0; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--color-muted);
+      font: 500 12px/1.4 var(--font-mono);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0 0 24px; font: 400 36px/1.15 var(--font-serif); }
+    svg { display: block; width: 100%; min-width: 1280px; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .t-name { font: 600 16px var(--font-sans); }
+    .t-sub  { font: 400 12px var(--font-sans); }
+    .t-mono { font: 400 12px var(--font-mono); }
+    .t-tag  { font: 500 8px var(--font-mono); letter-spacing: 0.08em; }
+    .t-lbl  { font: 500 12px var(--font-sans); }
+    .t-zone { font: 500 13px var(--font-sans); }
+    .t-callout { font: italic 400 16px var(--font-serif); }
+
+    /* Static source is complete. Only an initialized enhancement hides items. */
+    .motion-ready [data-motion-item] {
+      opacity: .12;
+      transform: translateY(8px);
+      transform-box: fill-box;
+      transform-origin: center;
+      transition: opacity var(--motion-step) var(--motion-ease),
+                  transform var(--motion-step) var(--motion-ease);
+    }
+    .motion-ready [data-motion-item].is-visible,
+    .motion-ready[data-frame="end"] [data-motion-item],
+    .motion-ready[data-frame="static"] [data-motion-item] {
+      opacity: 1;
+      transform: none;
+    }
+    .draw-path {
+      fill: none;
+      stroke: var(--color-accent);
+      stroke-width: 3;
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      pointer-events: none;
+    }
+    .motion-ready .draw-path.is-visible {
+      animation: draw-path var(--motion-step) linear forwards;
+    }
+    @keyframes draw-path { to { stroke-dashoffset: 0; } }
+
+    [data-motion-controls] {
+      display: none;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--color-rule);
+    }
+    .motion-ready [data-motion-controls] { display: flex; }
+    [data-motion-controls][hidden] { display: none !important; }
+    [data-motion-controls] button {
+      min-width: 44px;
+      min-height: 44px;
+      padding: 8px 12px;
+      border: 1px solid var(--color-muted);
+      border-radius: 4px;
+      color: var(--color-ink);
+      background: var(--color-paper);
+      font: 600 13px/1 var(--font-sans);
+      cursor: pointer;
+    }
+    [data-motion-controls] button:hover { border-color: var(--color-accent); }
+    [data-motion-controls] button:focus-visible {
+      outline: 3px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+    [data-motion-controls] button:disabled { cursor: not-allowed; opacity: .45; }
+    .keyboard-help { color: var(--color-soft); font: 500 12px/1.4 var(--font-sans); }
+    [data-motion-status-visible] {
+      margin-left: auto;
+      color: var(--color-muted);
+      font: 500 12px/1.4 var(--font-mono);
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+    noscript p {
+      margin: 12px 0 0;
+      color: var(--color-muted);
+      font: 500 12px/1.4 var(--font-mono);
+    }
+
+    html[data-motion="static"] [data-motion-controls],
+    html[data-motion="static"] [data-motion-decorative] { display: none !important; }
+    html[data-motion="static"] [data-motion-item] {
+      opacity: 1 !important;
+      transform: none !important;
+      animation: none !important;
+      transition: none !important;
+    }
+    html[data-motion="step"] [data-motion-controls],
+    html[data-motion="step"] [data-motion-decorative] { display: none !important; }
+    html[data-motion="step"] [data-motion-item] {
+      animation: none !important;
+      transition: none !important;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .001ms !important;
+      }
+      [data-motion-item] { opacity: 1 !important; transform: none !important; }
+      [data-motion-decorative] { display: none !important; }
+      [data-motion-controls] { display: none !important; }
+    }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+      [data-motion-controls], [data-motion-decorative] { display: none !important; }
+      [data-motion-item] {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+
+  <!-- ===================== 2. 閉環流程 ===================== -->
+  <section data-motion-root data-motion-mode="step" data-step-count="7" data-step-current="7" data-frame="static" data-static-frame="complete">
+    <p class="eyebrow">流程圖 · python 工具/update.py</p>
+    <h1>上游出新版，一條指令走到新的安裝檔</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 200 1280 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-motion-loop-title lite-motion-loop-desc">
+        <title id="lite-motion-loop-title">Filee Lite 閉環流程</title>
+        <desc id="lite-motion-loop-desc">update.py 查到上游新 tag 並寫差異報告，換上補丁、重編上游、以官方 Portable 為底組裝並編 Rust 外殼、自我檢查後產出安裝檔；補丁衝突時停下由人修，報告列出外殼要跟的改動時由人移植 shell 後重建。</desc>
+        <defs>
+          <marker id="lite-motion-loop-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>
+          <marker id="lite-motion-loop-proc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3949ab"/></marker>
+          <marker id="lite-motion-loop-check" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf9222"/></marker>
+          <marker id="lite-motion-loop-data" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#00897b"/></marker>
+          <marker id="lite-motion-loop-human" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#8e24aa"/></marker>
+          <marker id="lite-motion-loop-fail" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#e53935"/></marker>
+        </defs>
+        <rect x="0" y="0" width="1280" height="904" fill="#f4f7fb"/>
+
+        <!-- 連線層 -->
+        <g data-motion-item data-step="2" aria-label="步驟 2 連線：新 tag 進來，同時寫差異報告">
+          <line x1="304" y1="280" x2="366" y2="280" stroke="#2196f3" stroke-width="1.2" marker-end="url(#lite-motion-loop-in)"/>
+          <line x1="184" y1="328" x2="184" y2="470" stroke="#2196f3" stroke-width="1.2" marker-end="url(#lite-motion-loop-in)"/>
+          <rect x="312" y="252" width="48" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="336" y="264" class="t-lbl" fill="#1a75be" text-anchor="middle">新 tag</text>
+          <rect x="104" y="392" width="72" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="140" y="404" class="t-lbl" fill="#1a75be" text-anchor="middle">寫差異報告</text>
+        </g>
+        <g data-motion-item data-step="7" aria-label="步驟 7 連線：補丁套不上就停；外殼有改就由人移植再 --rebuild">
+          <line x1="488" y1="328" x2="488" y2="470" stroke="#e53935" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-motion-loop-fail)"/>
+          <line x1="184" y1="568" x2="184" y2="678" stroke="#00897b" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-motion-loop-data)"/>
+          <path d="M 560,720 H 632 Q 640,720 640,712 V 368 Q 640,360 648,360 H 692 Q 700,360 700,352 V 330" fill="none" stroke="#8e24aa" stroke-width="1.2" marker-end="url(#lite-motion-loop-human)"/>
+          <rect x="420" y="392" width="60" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="450" y="404" class="t-lbl" fill="#d33431" text-anchor="middle">套不上</text>
+          <rect x="192" y="616" width="148" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="266" y="628" class="t-lbl" fill="#007e71" text-anchor="middle">外殼有改（結束碼 2）</text>
+          <rect x="648" y="608" width="72" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="684" y="620" class="t-mono" fill="#8e24aa" text-anchor="middle">--rebuild</text>
+        </g>
+
+        <!-- 節點層 -->
+        <g data-motion-item data-step="1" aria-label="步驟 1：查上游新版並抓 tag，一天最多問一次">
+          <rect x="64" y="232" width="240" height="96" rx="6" fill="#c1e0f9" stroke="#2196f3" stroke-width="1.2"/>
+          <rect x="72" y="238" width="24" height="12" rx="2" fill="none" stroke="#2196f3" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="84" y="247" class="t-tag" fill="#1663a0" text-anchor="middle">1</text>
+          <text x="184" y="272" class="t-name" fill="#14213d" text-anchor="middle">查新版・抓 tag</text>
+          <text x="184" y="292" class="t-mono" fill="#44506b" text-anchor="middle">GitHub releases/latest</text>
+          <text x="184" y="312" class="t-sub" fill="#44506b" text-anchor="middle">一天最多問一次・不取建置腳本</text>
+        </g>
+        <g data-motion-item data-step="2" aria-label="步驟 2：換上補丁，並寫好差異報告">
+          <rect x="368" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+          <rect x="376" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="388" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">2</text>
+          <text x="488" y="272" class="t-name" fill="#14213d" text-anchor="middle">換補丁</text>
+          <text x="488" y="292" class="t-mono" fill="#44506b" text-anchor="middle">git apply --3way</text>
+          <text x="488" y="312" class="t-sub" fill="#44506b" text-anchor="middle">hosted.patch：4 個檔 +117／−9</text>
+          <rect x="64" y="472" width="240" height="96" rx="6" fill="#b9dddc" stroke="#00897b" stroke-width="1.2"/>
+          <rect x="72" y="478" width="40" height="12" rx="2" fill="none" stroke="#00897b" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="92" y="487" class="t-tag" fill="#00685d" text-anchor="middle">REPORT</text>
+          <text x="184" y="512" class="t-name" fill="#14213d" text-anchor="middle">差異報告</text>
+          <text x="184" y="532" class="t-mono" fill="#44506b" text-anchor="middle">docs\upstream-diffs\</text>
+          <text x="184" y="552" class="t-sub" fill="#44506b" text-anchor="middle">外殼要跟／補丁碰到／自動跟上</text>
+        </g>
+        <g data-motion-item data-step="3" aria-label="步驟 3：重編上游，字型從腳本解析並驗 SHA-256">
+          <line x1="608" y1="280" x2="670" y2="280" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-motion-loop-proc)"/>
+          <rect x="612" y="252" width="56" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="640" y="264" class="t-lbl" fill="#3949ab" text-anchor="middle">補丁就位</text>
+          <rect x="672" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+          <rect x="680" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="692" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">3</text>
+          <text x="792" y="272" class="t-name" fill="#14213d" text-anchor="middle">編上游</text>
+          <text x="792" y="292" class="t-mono" fill="#44506b" text-anchor="middle">dotnet publish ReadyToRun</text>
+          <text x="792" y="312" class="t-sub" fill="#44506b" text-anchor="middle">字型從腳本解析・SHA-256 驗證</text>
+        </g>
+        <g data-motion-item data-step="4" aria-label="步驟 4：以官方 Portable 為底組裝並編 Rust 外殼">
+          <line x1="912" y1="280" x2="974" y2="280" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-motion-loop-proc)"/>
+          <rect x="976" y="232" width="240" height="96" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+          <rect x="984" y="238" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="996" y="247" class="t-tag" fill="#3949ab" text-anchor="middle">4</text>
+          <text x="1096" y="272" class="t-name" fill="#14213d" text-anchor="middle">組裝</text>
+          <text x="1096" y="292" class="t-mono" fill="#44506b" text-anchor="middle">Portable.zip ＋ Filee.dll</text>
+          <text x="1096" y="312" class="t-sub" fill="#44506b" text-anchor="middle">官方 SHA256SUMS・cargo build</text>
+        </g>
+        <g data-motion-item data-step="5" aria-label="步驟 5：自我檢查，真的轉一次檔">
+          <line x1="1096" y1="328" x2="1096" y2="470" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-motion-loop-proc)"/>
+          <rect x="1104" y="392" width="64" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="1136" y="404" class="t-lbl" fill="#3949ab" text-anchor="middle">stage 好</text>
+          <rect x="976" y="472" width="240" height="96" rx="6" fill="#f6eaca" stroke="#d8a527" stroke-width="1.2"/>
+          <rect x="984" y="478" width="24" height="12" rx="2" fill="none" stroke="#d8a527" stroke-opacity="0.8" stroke-width="0.8"/>
+          <text x="996" y="487" class="t-tag" fill="#836417" text-anchor="middle">5</text>
+          <text x="1096" y="512" class="t-name" fill="#14213d" text-anchor="middle">自我檢查</text>
+          <text x="1096" y="532" class="t-mono" fill="#44506b" text-anchor="middle">cargo test · --selftest</text>
+          <text x="1096" y="552" class="t-sub" fill="#44506b" text-anchor="middle">真的轉一次 SVG→PNG（複本資料）</text>
+        </g>
+        <g data-motion-item data-step="6" aria-label="步驟 6：產出新的安裝檔，帶去別台電腦">
+          <line x1="976" y1="520" x2="914" y2="520" stroke="#bf9222" stroke-width="1.2" marker-end="url(#lite-motion-loop-check)"/>
+          <rect x="920" y="492" width="48" height="16" rx="2" fill="#f4f7fb"/>
+          <text x="944" y="504" class="t-mono" fill="#8d6c19" text-anchor="middle">PASS</text>
+          <rect x="672" y="472" width="240" height="96" rx="6" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1.6"/>
+          <rect x="680" y="478" width="24" height="12" rx="2" fill="none" stroke="#fb8c00" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="692" y="487" class="t-tag" fill="#925100" text-anchor="middle">6</text>
+          <text x="792" y="512" class="t-name" fill="#14213d" text-anchor="middle">新的安裝檔</text>
+          <text x="792" y="532" class="t-mono" fill="#44506b" text-anchor="middle">dist\FileeLite-&lt;版&gt;-Setup.exe</text>
+          <text x="792" y="552" class="t-sub" fill="#44506b" text-anchor="middle">帶去別台・裝給目前使用者</text>
+          <text x="976" y="640" class="t-callout" fill="#44506b">報告第 1 節是空的 → 結束碼 0，</text>
+          <text x="976" y="664" class="t-callout" fill="#44506b">安裝檔直接帶走；引擎、工具視窗、</text>
+          <text x="976" y="688" class="t-callout" fill="#44506b">翻譯的改進都已經在裡面。</text>
+        </g>
+        <g data-motion-item data-step="7" aria-label="步驟 7：只在有狀況時才要人——補丁衝突，或報告列出外殼要跟的改動">
+          <rect x="368" y="472" width="240" height="96" rx="6" fill="#f0c9cb" stroke="#e53935" stroke-width="1.2"/>
+          <rect x="376" y="478" width="32" height="12" rx="2" fill="none" stroke="#e53935" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="392" y="487" class="t-tag" fill="#a92a27" text-anchor="middle">STOP</text>
+          <text x="488" y="512" class="t-name" fill="#14213d" text-anchor="middle">停下：人修補丁</text>
+          <text x="488" y="532" class="t-mono" fill="#44506b" text-anchor="middle">git diff &gt; hosted.patch</text>
+          <text x="488" y="552" class="t-sub" fill="#44506b" text-anchor="middle">修好後 --rebuild 接回第 3 步</text>
+          <rect x="64" y="680" width="496" height="80" rx="6" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1.2"/>
+          <rect x="72" y="686" width="40" height="12" rx="2" fill="none" stroke="#8e24aa" stroke-opacity="0.6" stroke-width="0.8"/>
+          <text x="92" y="695" class="t-tag" fill="#8b23a7" text-anchor="middle">HUMAN</text>
+          <text x="312" y="718" class="t-name" fill="#14213d" text-anchor="middle">照報告第 1 節把改動搬進 shell/</text>
+          <text x="312" y="740" class="t-sub" fill="#44506b" text-anchor="middle">只看列出的上游檔（觸發、選單、通知、資料格式、CLI 輸出）・cargo test</text>
+        </g>
+
+        <!-- 圖例（一直在） -->
+        <line x1="40" y1="796" x2="1240" y2="796" stroke="#44506b" stroke-opacity="0.25" stroke-width="0.8"/>
+        <text x="40" y="828" class="t-lbl" fill="#44506b">圖例</text>
+        <rect x="88" y="818" width="14" height="10" rx="2" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1"/>
+        <text x="110" y="828" class="t-sub" fill="#44506b">產出（焦點）</text>
+        <rect x="200" y="818" width="14" height="10" rx="2" fill="#c1e0f9" stroke="#2196f3" stroke-width="1"/>
+        <text x="222" y="828" class="t-sub" fill="#44506b">起點</text>
+        <rect x="268" y="818" width="14" height="10" rx="2" fill="#c7cde8" stroke="#3949ab" stroke-width="1"/>
+        <text x="290" y="828" class="t-sub" fill="#44506b">自動步驟</text>
+        <rect x="364" y="818" width="14" height="10" rx="2" fill="#f6eaca" stroke="#d8a527" stroke-width="1"/>
+        <text x="386" y="828" class="t-sub" fill="#44506b">檢查</text>
+        <rect x="432" y="818" width="14" height="10" rx="2" fill="#b9dddc" stroke="#00897b" stroke-width="1"/>
+        <text x="454" y="828" class="t-sub" fill="#44506b">報告</text>
+        <rect x="500" y="818" width="14" height="10" rx="2" fill="#f0c9cb" stroke="#e53935" stroke-width="1"/>
+        <text x="522" y="828" class="t-sub" fill="#44506b">停下</text>
+        <rect x="568" y="818" width="14" height="10" rx="2" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1"/>
+        <text x="590" y="828" class="t-sub" fill="#44506b">要人做的</text>
+        <line x1="676" y1="823" x2="704" y2="823" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-motion-loop-proc)"/>
+        <text x="712" y="828" class="t-sub" fill="#44506b">每次都走（線色同起點）</text>
+        <line x1="868" y1="823" x2="896" y2="823" stroke="#e53935" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-motion-loop-fail)"/>
+        <text x="904" y="828" class="t-sub" fill="#44506b">只在有狀況時才走</text>
+
+        <!-- 裝飾：PASS → 安裝檔描線 -->
+        <path data-motion-item data-step="6" data-motion-decorative aria-hidden="true" focusable="false" pathLength="1" class="draw-path" d="M976 520 H914"/>
+      </svg>
+    </div>
+
+    <div data-motion-controls role="group" aria-label="閉環流程圖播放控制">
+      <button type="button" data-motion-action="prev">上一步</button>
+      <button type="button" data-motion-action="play" aria-pressed="false">播放</button>
+      <button type="button" data-motion-action="pause" aria-pressed="true">暫停</button>
+      <button type="button" data-motion-action="next">下一步</button>
+      <button type="button" data-motion-action="replay">重播</button>
+      <span class="keyboard-help">←／→ 上下一步 · 空白鍵 播放／暫停 · R 重播 · Home／End 跳頭尾</span>
+      <span data-motion-status-visible aria-hidden="true">第 <span data-motion-step-label>7</span> 步，共 7 步</span>
+    </div>
+    <p class="sr-only" data-motion-status role="status" aria-live="polite" aria-atomic="true"></p>
+    <noscript><p>播放控制需要 JavaScript；上面顯示的是完整的圖。</p></noscript>
+  </section>
+
+</main>
+
+  <script data-diagram-controls>
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const staticOverride = params.get('motion') === 'static' || document.documentElement.dataset.motion === 'static';
+      const requestedStep = params.get('step');
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+      document.fonts.ready.then(() => { document.documentElement.dataset.fontsReady = 'true'; });
+
+      document.querySelectorAll('[data-motion-root]').forEach((root) => {
+        const count = Number(root.dataset.stepCount);
+        const hold = parseFloat(getComputedStyle(root).getPropertyValue('--motion-hold')) || 720;
+        const parsedStep = requestedStep !== null && /^\d+$/.test(requestedStep) ? Number(requestedStep) : null;
+        const exactStep = params.get('motion') === 'step' && Number.isSafeInteger(parsedStep) && parsedStep >= 0 && parsedStep <= count ? parsedStep : null;
+        const items = [...root.querySelectorAll('[data-motion-item]')];
+        const labels = Array.from({ length: count + 1 }, (_, index) => index === 0
+          ? 'Ready'
+          : items.filter((item) => !item.hasAttribute('data-motion-decorative') && Number(item.dataset.step) === index)
+              .map((item) => item.getAttribute('aria-label')).join('; '));
+        const controls = root.querySelector('[data-motion-controls]');
+        const status = root.querySelector('[data-motion-status]');
+        const visibleStep = root.querySelector('[data-motion-step-label]');
+        let step = count;
+        let timer = 0;
+        let playing = false;
+        let stepBeforeReduce = 0;
+        let resumeAfterReduce = root.dataset.motionMode === 'reveal';
+
+        const buttons = (action) => controls.querySelector(`[data-motion-action="${action}"]`);
+        const clearClock = () => { window.clearTimeout(timer); timer = 0; };
+        const announce = () => { status.textContent = `Step ${step} of ${count}: ${labels[step] || 'Complete'}`; };
+        const setControlsAvailable = (available) => {
+          controls.hidden = !available;
+          controls.setAttribute('aria-hidden', String(!available));
+          controls.dataset.playbackDisabled = String(!available);
+          controls.querySelectorAll('button').forEach((control) => { control.disabled = !available; });
+        };
+
+        function render(next, userInitiated = false) {
+          step = Math.max(0, Math.min(count, next));
+          root.dataset.stepCurrent = String(step);
+          root.dataset.frame = step === count ? 'end' : step === 0 ? 'start' : 'step';
+          items.forEach((item) => {
+            const itemStep = Number(item.dataset.step);
+            item.classList.toggle('is-visible', itemStep <= step);
+            item.classList.toggle('is-current', itemStep === step);
+          });
+          if (visibleStep) visibleStep.textContent = String(step);
+          const unavailable = controls.dataset.playbackDisabled === 'true';
+          buttons('prev').disabled = unavailable || step === 0;
+          buttons('next').disabled = unavailable || step === count;
+          if (userInitiated) announce();
+        }
+
+        function pause(userInitiated = false) {
+          clearClock();
+          playing = false;
+          root.classList.remove('is-playing');
+          buttons('play').setAttribute('aria-pressed', 'false');
+          buttons('pause').setAttribute('aria-pressed', 'true');
+          if (userInitiated) status.textContent = `Paused at step ${step} of ${count}`;
+        }
+
+        function finish() {
+          pause(false);
+          root.dataset.frame = 'end';
+          status.textContent = `Complete · step ${count} of ${count}`;
+        }
+
+        function tick() {
+          if (!playing) return;
+          if (step >= count) { finish(); return; }
+          render(step + 1, false);
+          if (step >= count) { finish(); return; }
+          timer = window.setTimeout(tick, hold);
+        }
+
+        function play(fromStart = false, userInitiated = false) {
+          clearClock();
+          if (fromStart || step >= count) render(0, userInitiated);
+          playing = true;
+          root.classList.add('is-playing');
+          buttons('play').setAttribute('aria-pressed', 'true');
+          buttons('pause').setAttribute('aria-pressed', 'false');
+          timer = window.setTimeout(tick, hold);
+        }
+
+        controls.addEventListener('click', (event) => {
+          const button = event.target.closest('[data-motion-action]');
+          if (!button) return;
+          const action = button.dataset.motionAction;
+          if (action === 'play') play(false, true);
+          if (action === 'pause') pause(true);
+          if (action === 'replay') play(true, true);
+          if (action === 'prev') { pause(false); render(step - 1, true); }
+          if (action === 'next') { pause(false); render(step + 1, true); }
+        });
+
+        root.addEventListener('keydown', (event) => {
+          if (event.target.matches('input, textarea, select, a[href]')) return;
+          const keys = { ArrowLeft: step - 1, ArrowRight: step + 1, Home: 0, End: count };
+          if (event.code === 'Space' && !event.target.closest('button')) {
+            event.preventDefault();
+            playing ? pause(true) : play(false, true);
+            return;
+          }
+          if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'r') {
+            event.preventDefault();
+            play(true, true);
+            return;
+          }
+          if (!(event.key in keys)) return;
+          event.preventDefault();
+          pause(false);
+          render(keys[event.key], true);
+        });
+
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden' && playing) pause(false);
+        });
+        reduce.addEventListener('change', (event) => {
+          if (event.matches && root.dataset.motionState !== 'reduced') {
+            stepBeforeReduce = step;
+            resumeAfterReduce = playing;
+          }
+          pause(false);
+          if (event.matches) {
+            setControlsAvailable(false);
+            render(count, false);
+            root.dataset.frame = 'static';
+            root.dataset.motionState = 'reduced';
+            status.textContent = 'Reduced motion · complete static frame · playback controls unavailable';
+          } else if (staticOverride || root.dataset.motionMode === 'none') {
+            setControlsAvailable(false);
+            render(count, false);
+            root.dataset.frame = 'static';
+            root.dataset.motionState = 'static';
+            status.textContent = 'Static frame · complete diagram · playback controls unavailable';
+          } else {
+            delete root.dataset.motionState;
+            if (exactStep !== null) {
+              setControlsAvailable(false);
+              render(exactStep, false);
+              root.dataset.frame = 'step';
+              root.dataset.motionState = 'test';
+              status.textContent = `Test frame · step ${step} of ${count} · playback controls unavailable`;
+            } else {
+              setControlsAvailable(true);
+              render(stepBeforeReduce, false);
+              status.textContent = `Ready · step ${step} of ${count}`;
+              if (resumeAfterReduce && root.dataset.motionMode === 'reveal') {
+                play(false, false);
+              }
+            }
+            resumeAfterReduce = false;
+          }
+        });
+
+        if (staticOverride) {
+          document.documentElement.dataset.motion = 'static';
+          pause(false);
+          setControlsAvailable(false);
+          render(count, false);
+          root.dataset.frame = 'static';
+          root.dataset.motionState = 'static';
+          status.textContent = 'Static frame · complete diagram · playback controls unavailable';
+        } else if (reduce.matches || root.dataset.motionMode === 'none') {
+          pause(false);
+          setControlsAvailable(false);
+          render(count, false);
+          root.dataset.frame = 'static';
+          root.dataset.motionState = reduce.matches ? 'reduced' : 'static';
+          status.textContent = reduce.matches
+            ? 'Reduced motion · complete static frame · playback controls unavailable'
+            : 'Static frame · complete diagram · playback controls unavailable';
+        } else if (exactStep !== null) {
+          document.documentElement.dataset.motion = 'step';
+          pause(false);
+          setControlsAvailable(false);
+          render(exactStep, false);
+          root.dataset.frame = 'step';
+          root.dataset.motionState = 'test';
+          status.textContent = `Test frame · step ${step} of ${count} · playback controls unavailable`;
+        } else if (root.dataset.motionMode === 'reveal') {
+          setControlsAvailable(true);
+          render(0, false);
+          play(false, false);
+        } else {
+          pause(false);
+          setControlsAvailable(true);
+          render(0, false);
+          status.textContent = `Ready · step 0 of ${count}`;
+        }
+        root.classList.add('motion-ready');
+      });
+    })();
+  </script>
+</body>
+</html>

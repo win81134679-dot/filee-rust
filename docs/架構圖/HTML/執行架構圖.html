@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filee Lite 執行架構圖</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #f4f7fb; }
+    /* A2 橫式滿版（594×420 mm = 2245×1587 CSS px）：SVG 就是整頁，標題也畫在 SVG 裡 */
+    body { width: 2245px; height: 1587px; overflow: hidden; }
+    .diagram-container { width: 2245px; height: 1587px; overflow-x: auto; }
+    svg { width: 2245px; height: 1587px; min-width: 1280px; display: block; }
+    .t-title { font: 400 44px 'Instrument Serif', 'Noto Serif TC', serif; letter-spacing: -0.01em; }
+    .t-eyebrow { font: 500 13px 'Geist', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-name { font: 600 16px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-sub  { font: 400 12px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-mono { font: 400 12px 'Geist Mono', ui-monospace, monospace; }
+    .t-tag  { font: 500 8px 'Geist Mono', ui-monospace, monospace; letter-spacing: 0.08em; }
+    .t-lbl  { font: 500 12px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-zone { font: 500 13px 'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+    .t-callout { font: italic 400 16px 'Instrument Serif', 'Noto Serif TC', serif; }
+  </style>
+</head>
+<body>
+<div class="diagram-container">
+<svg viewBox="0 0 1280 904" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lite-arch-title lite-arch-desc">
+<title id="lite-arch-title">Filee Lite 執行架構圖</title>
+<desc id="lite-arch-desc">常駐的 Rust 程式 filee-lite.exe 接住 Ctrl 拖曳與快捷鍵、顯示環形選單；一般轉檔交給每次啟動、轉完就結束的上游 filee-cli，設定與互動工具臨時開上游 Filee.exe 的 hosted 模式，三者共用 %APPDATA%\Filee 的設定檔與同一組轉換引擎。</desc>
+<defs>
+<marker id="lite-arch-arr-in" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2196f3"/></marker>
+<marker id="lite-arch-arr-proc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3949ab"/></marker>
+<marker id="lite-arch-arr-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#e27e00"/></marker>
+<marker id="lite-arch-arr-ui" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#8e24aa"/></marker>
+<marker id="lite-arch-arr-temp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf9222"/></marker>
+<marker id="lite-arch-arr-muted" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#44506b"/></marker>
+</defs>
+
+<!-- 背景與標題 -->
+<rect width="100%" height="100%" fill="#f4f7fb"/>
+<text x="40" y="56" class="t-eyebrow" fill="#44506b">架構圖 · Filee Lite（Rust 常駐外殼 ＋ 上游 Filee 2.2.0）</text>
+<text x="40" y="112" class="t-title" fill="#14213d">常駐的只有等待與選擇，轉檔與視窗用完就結束</text>
+
+<!-- 區塊（最先畫） -->
+<rect x="296" y="160" width="536" height="384" rx="8" fill="#14213d" fill-opacity="0.02" stroke="#14213d" stroke-opacity="0.10" stroke-width="0.8"/>
+<text x="312" y="184" class="t-zone" fill="#56627c">filee-lite.exe · 一直開著（Rust）</text>
+<text x="816" y="184" class="t-mono" fill="#56627c" text-anchor="end">閒置目標 &lt; 30 MB（待實測）</text>
+<rect x="872" y="160" width="360" height="384" rx="8" fill="#14213d" fill-opacity="0.02" stroke="#14213d" stroke-opacity="0.10" stroke-width="0.8" stroke-dasharray="5,4"/>
+<text x="888" y="184" class="t-zone" fill="#56627c">上游 Filee · 要用才開，做完自己結束</text>
+
+<!-- 連線（在節點之前） -->
+<line x1="264" y1="260" x2="318" y2="260" stroke="#2196f3" stroke-width="1.2" marker-end="url(#lite-arch-arr-in)"/>
+<line x1="544" y1="260" x2="582" y2="260" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-arch-arr-proc)"/>
+<line x1="808" y1="244" x2="894" y2="244" stroke="#e27e00" stroke-width="1.6" marker-end="url(#lite-arch-arr-accent)"/>
+<path d="M 808,284 H 844 Q 852,284 852,292 V 432 Q 852,440 860,440 H 894" fill="none" stroke="#e27e00" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-arch-arr-accent)"/>
+<line x1="808" y1="468" x2="894" y2="468" stroke="#8e24aa" stroke-width="1.2" marker-end="url(#lite-arch-arr-ui)"/>
+<path d="M 1216,244 H 1244 Q 1252,244 1252,252 V 696 Q 1252,704 1244,704 H 1218" fill="none" stroke="#3949ab" stroke-width="1.2" marker-end="url(#lite-arch-arr-proc)"/>
+<line x1="1056" y1="496" x2="1056" y2="662" stroke="#bf9222" stroke-width="1.2" marker-end="url(#lite-arch-arr-temp)"/>
+<line x1="564" y1="544" x2="564" y2="662" stroke="#44506b" stroke-width="1.2" marker-end="url(#lite-arch-arr-muted)"/>
+<path d="M 896,484 H 872 Q 864,484 864,492 V 696 Q 864,704 856,704 H 834" fill="none" stroke="#bf9222" stroke-width="1.2" marker-end="url(#lite-arch-arr-temp)"/>
+
+<!-- 連線標籤（遮罩在線外，留 8px） -->
+<rect x="822" y="216" width="64" height="16" rx="2" fill="#f4f7fb"/>
+<text x="854" y="228" class="t-lbl" fill="#a65c00" text-anchor="middle">一般轉檔</text>
+<rect x="760" y="348" width="84" height="16" rx="2" fill="#f4f7fb"/>
+<text x="802" y="360" class="t-lbl" fill="#a65c00" text-anchor="middle">工具・合併</text>
+<rect x="818" y="476" width="68" height="16" rx="2" fill="#f4f7fb"/>
+<text x="852" y="488" class="t-lbl" fill="#8e24aa" text-anchor="middle">開設定</text>
+<rect x="1066" y="576" width="52" height="16" rx="2" fill="#f4f7fb"/>
+<text x="1092" y="588" class="t-lbl" fill="#8d6c19" text-anchor="middle">同一組</text>
+<rect x="576" y="596" width="108" height="16" rx="2" fill="#f4f7fb"/>
+<text x="630" y="608" class="t-lbl" fill="#44506b" text-anchor="middle">讀設定・寫紀錄</text>
+<rect x="874" y="592" width="56" height="16" rx="2" fill="#f4f7fb"/>
+<text x="902" y="604" class="t-lbl" fill="#8d6c19" text-anchor="middle">改設定</text>
+
+<!-- 節點：使用者（輸入，藍） -->
+<rect x="64" y="216" width="200" height="120" rx="6" fill="#f4f7fb"/>
+<rect x="64" y="216" width="200" height="120" rx="6" fill="#c1e0f9" stroke="#2196f3" stroke-width="1.2"/>
+<rect x="72" y="222" width="32" height="12" rx="2" fill="none" stroke="#2196f3" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="88" y="231" class="t-tag" fill="#1663a0" text-anchor="middle">USER</text>
+<text x="164" y="258" class="t-name" fill="#14213d" text-anchor="middle">檔案總管裡的你</text>
+<text x="164" y="280" class="t-sub" fill="#44506b" text-anchor="middle">按住 Ctrl 拖檔案</text>
+<text x="164" y="300" class="t-mono" fill="#44506b" text-anchor="middle">Ctrl+Alt+Space</text>
+<text x="164" y="320" class="t-sub" fill="#44506b" text-anchor="middle">右鍵「用 Filee 轉換」</text>
+
+<!-- 節點：全域輸入與手勢（處理，靛） -->
+<rect x="320" y="216" width="224" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="320" y="216" width="224" height="88" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="328" y="222" width="32" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="344" y="231" class="t-tag" fill="#3949ab" text-anchor="middle">HOOK</text>
+<text x="432" y="254" class="t-name" fill="#14213d" text-anchor="middle">全域輸入與手勢</text>
+<text x="432" y="274" class="t-mono" fill="#44506b" text-anchor="middle">WH_MOUSE_LL · WH_KEYBOARD_LL</text>
+<text x="432" y="292" class="t-sub" fill="#44506b" text-anchor="middle">只聽不攔・判斷是不是檔案總管</text>
+
+<!-- 節點：環形選單（焦點，橘） -->
+<rect x="584" y="216" width="224" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="584" y="216" width="224" height="88" rx="6" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1.2"/>
+<rect x="592" y="222" width="36" height="12" rx="2" fill="none" stroke="#fb8c00" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="610" y="231" class="t-tag" fill="#925100" text-anchor="middle">DONUT</text>
+<text x="696" y="254" class="t-name" fill="#14213d" text-anchor="middle">環形選單</text>
+<text x="696" y="274" class="t-mono" fill="#44506b" text-anchor="middle">Direct2D · OLE 拖放</text>
+<text x="696" y="292" class="t-sub" fill="#44506b" text-anchor="middle">依檔案類型選面・正反面・群組</text>
+
+<!-- 節點：自動轉換資料夾（處理，靛） -->
+<rect x="320" y="408" width="224" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="320" y="408" width="224" height="88" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="328" y="414" width="36" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="346" y="423" class="t-tag" fill="#3949ab" text-anchor="middle">WATCH</text>
+<text x="432" y="446" class="t-name" fill="#14213d" text-anchor="middle">自動轉換資料夾</text>
+<text x="432" y="466" class="t-sub" fill="#44506b" text-anchor="middle">檔案穩定 2 秒才轉</text>
+<text x="432" y="484" class="t-sub" fill="#44506b" text-anchor="middle">300 DPI 政策・右鍵選單</text>
+
+<!-- 節點：通知與系統匣（介面，紫） -->
+<rect x="584" y="408" width="224" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="584" y="408" width="224" height="88" rx="6" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1.2"/>
+<rect x="592" y="414" width="20" height="12" rx="2" fill="none" stroke="#8e24aa" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="602" y="423" class="t-tag" fill="#8b23a7" text-anchor="middle">UI</text>
+<text x="696" y="446" class="t-name" fill="#14213d" text-anchor="middle">進度通知與系統匣</text>
+<text x="696" y="466" class="t-sub" fill="#44506b" text-anchor="middle">完成檔數・開啟・開資料夾</text>
+<text x="696" y="484" class="t-sub" fill="#44506b" text-anchor="middle">暫停／恢復・結束</text>
+
+<!-- 節點：filee-cli（處理，靛） -->
+<rect x="896" y="216" width="320" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="896" y="216" width="320" height="88" rx="6" fill="#c7cde8" stroke="#3949ab" stroke-width="1.2"/>
+<rect x="904" y="222" width="24" height="12" rx="2" fill="none" stroke="#3949ab" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="916" y="231" class="t-tag" fill="#3949ab" text-anchor="middle">CLI</text>
+<text x="1056" y="254" class="t-name" fill="#14213d" text-anchor="middle">filee-cli.exe</text>
+<text x="1056" y="274" class="t-mono" fill="#44506b" text-anchor="middle">convert --preset &lt;id&gt;</text>
+<text x="1056" y="292" class="t-sub" fill="#44506b" text-anchor="middle">每次一個・轉完就結束（實測 0.5 秒、89 MB）</text>
+
+<!-- 節點：hosted Filee.exe（暫時，黃） -->
+<rect x="896" y="408" width="320" height="88" rx="6" fill="#f4f7fb"/>
+<rect x="896" y="408" width="320" height="88" rx="6" fill="#f6eaca" stroke="#d8a527" stroke-width="1.2"/>
+<rect x="904" y="414" width="28" height="12" rx="2" fill="none" stroke="#d8a527" stroke-opacity="0.8" stroke-width="0.8"/>
+<text x="918" y="423" class="t-tag" fill="#836417" text-anchor="middle">GUI</text>
+<text x="1056" y="446" class="t-name" fill="#14213d" text-anchor="middle">Filee.exe --hosted</text>
+<text x="1056" y="466" class="t-mono" fill="#44506b" text-anchor="middle">--settings · --run=&lt;工具&gt;</text>
+<text x="1056" y="484" class="t-sub" fill="#44506b" text-anchor="middle">裁切・剪輯・頁面編輯・列印工作室</text>
+
+<!-- 節點：共用設定（儲存，青） -->
+<rect x="320" y="664" width="512" height="80" rx="6" fill="#f4f7fb"/>
+<rect x="320" y="664" width="512" height="80" rx="6" fill="#b9dddc" stroke="#00897b" stroke-width="1.2"/>
+<rect x="328" y="670" width="28" height="12" rx="2" fill="none" stroke="#00897b" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="342" y="679" class="t-tag" fill="#00685d" text-anchor="middle">JSON</text>
+<text x="576" y="700" class="t-name" fill="#14213d" text-anchor="middle">共用的設定與紀錄</text>
+<text x="576" y="722" class="t-mono" fill="#44506b" text-anchor="middle">%APPDATA%\Filee\ settings · presets · profiles · history</text>
+
+<!-- 節點：轉換引擎（外部，灰藍） -->
+<rect x="896" y="664" width="320" height="80" rx="6" fill="#f4f7fb"/>
+<rect x="896" y="664" width="320" height="80" rx="6" fill="#d6dee4" stroke="#78909c" stroke-width="1.2"/>
+<rect x="904" y="670" width="24" height="12" rx="2" fill="none" stroke="#78909c" stroke-opacity="0.6" stroke-width="0.8"/>
+<text x="916" y="679" class="t-tag" fill="#4f5f67" text-anchor="middle">EXT</text>
+<text x="1056" y="700" class="t-name" fill="#14213d" text-anchor="middle">轉換引擎（每週自動更新）</text>
+<text x="1056" y="722" class="t-sub" fill="#44506b" text-anchor="middle">MS Office 優先 → LibreOffice・7-Zip・OCR…</text>
+
+<!-- 說明 -->
+<text x="64" y="420" class="t-callout" fill="#44506b">上游原版一直開著</text>
+<text x="64" y="444" class="t-callout" fill="#44506b">要 ~300 MB；</text>
+<text x="64" y="468" class="t-callout" fill="#44506b">轉換能力一行沒改，</text>
+<text x="64" y="492" class="t-callout" fill="#44506b">上游改版整包替換。</text>
+
+<!-- 圖例 -->
+<line x1="40" y1="796" x2="1240" y2="796" stroke="#44506b" stroke-opacity="0.25" stroke-width="0.8"/>
+<text x="40" y="828" class="t-lbl" fill="#44506b">圖例</text>
+<rect x="88" y="818" width="14" height="10" rx="2" fill="#f6ddbf" stroke="#fb8c00" stroke-width="1"/>
+<text x="110" y="828" class="t-sub" fill="#44506b">環形選單（焦點）</text>
+<rect x="222" y="818" width="14" height="10" rx="2" fill="#c1e0f9" stroke="#2196f3" stroke-width="1"/>
+<text x="244" y="828" class="t-sub" fill="#44506b">使用者操作</text>
+<rect x="324" y="818" width="14" height="10" rx="2" fill="#c7cde8" stroke="#3949ab" stroke-width="1"/>
+<text x="346" y="828" class="t-sub" fill="#44506b">處理程式</text>
+<rect x="414" y="818" width="14" height="10" rx="2" fill="#dcc4e8" stroke="#8e24aa" stroke-width="1"/>
+<text x="436" y="828" class="t-sub" fill="#44506b">畫面元件</text>
+<rect x="504" y="818" width="14" height="10" rx="2" fill="#f6eaca" stroke="#d8a527" stroke-width="1"/>
+<text x="526" y="828" class="t-sub" fill="#44506b">臨時開啟的上游視窗</text>
+<rect x="650" y="818" width="14" height="10" rx="2" fill="#b9dddc" stroke="#00897b" stroke-width="1"/>
+<text x="672" y="828" class="t-sub" fill="#44506b">共用資料</text>
+<rect x="740" y="818" width="14" height="10" rx="2" fill="#d6dee4" stroke="#78909c" stroke-width="1"/>
+<text x="762" y="828" class="t-sub" fill="#44506b">外部引擎</text>
+<line x1="836" y1="823" x2="864" y2="823" stroke="#e27e00" stroke-width="1.6" marker-end="url(#lite-arch-arr-accent)"/>
+<text x="872" y="828" class="t-sub" fill="#44506b">選了就跑（線色同起點）</text>
+<line x1="1028" y1="823" x2="1056" y2="823" stroke="#e27e00" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#lite-arch-arr-accent)"/>
+<text x="1064" y="828" class="t-sub" fill="#44506b">要開視窗的才走這條</text>
+</svg>
+</div>
+</body>
+</html>
