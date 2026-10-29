@@ -38,6 +38,12 @@ static TARGET: AtomicIsize = AtomicIsize::new(0);
 /// The window that receives `WM_APP_EVENT` (set once by main).
 pub fn set_target(hwnd: HWND) {
     TARGET.store(hwnd.0 as isize, Ordering::SeqCst);
+    // Events posted before the window existed (start-up's "update complete") would otherwise wait for the next one.
+    if !QUEUE.lock().unwrap_or_else(|e| e.into_inner()).is_empty() {
+        unsafe {
+            let _ = PostMessageW(Some(hwnd), WM_APP_EVENT, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 pub fn post(event: AppEvent) {

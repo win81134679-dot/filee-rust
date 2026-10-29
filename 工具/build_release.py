@@ -28,7 +28,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 8  # 2026-10-29: PDF merge / split group (7: installer is our fork of upstream's Avalonia Setup, not Inno Setup (6: save-race crash fix and bug sweep; 5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix))
+LITE_REV = 9  # 2026-10-29: PDF toolbox name, update notices (8: PDF merge / split group, 7: installer is our fork of upstream's Avalonia Setup, not Inno Setup (6: save-race crash fix and bug sweep; 5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix))
 UPSTREAM = ROOT / "upstream"
 PUBLIC_KEY = ROOT / "packaging" / "update.pub"
 PATCH = ROOT / "patches" / "hosted.patch"

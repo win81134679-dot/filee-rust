@@ -445,7 +445,7 @@ fn pdf_donut_has_the_office_group_and_it_converts() {
     let kids: Vec<_> = group.children.iter().map(|c| (c.preset_id.as_str(), c.enabled)).collect();
     println!("children {kids:?}");
     assert_eq!(kids.iter().map(|k| k.0).collect::<Vec<_>>(), ["to-docx", "to-xlsx", "to-pptx"]);
-    // And pdf-split gave way to "PDF 合併與拆分".
+    // And pdf-split gave way to "PDF 工具箱".
     assert!(all.iter().all(|s| s.preset_id != "pdf-split"), "pdf-split is still a slice of the PDF donut");
     let tools = all.iter().find(|s| s.preset_id == integration::PDF_TOOLS_GROUP).expect("no merge / split group");
     let tool_kids: Vec<_> = tools.children.iter().map(|c| (c.preset_id.as_str(), c.enabled)).collect();

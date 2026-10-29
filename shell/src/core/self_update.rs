@@ -257,6 +257,8 @@ pub struct State {
     pub sha256: Option<String>,
     /// How many times Setup was started for it.
     pub attempts: u32,
+    /// The tray's "check for updates" started it: the restarted Filee Rust says "update complete".
+    pub manual: bool,
 }
 
 impl State {
@@ -266,12 +268,16 @@ impl State {
         });
         let sha256 = v.pointer("/ready/sha256").and_then(Value::as_str).map(str::to_string);
         let attempts = v.pointer("/ready/attempts").and_then(Value::as_u64).unwrap_or(0) as u32;
-        State { last_check: v.get("lastCheck").and_then(Value::as_u64).unwrap_or(0), ready, sha256, attempts }
+        let manual = v.pointer("/ready/manual").and_then(Value::as_bool).unwrap_or(false);
+        State { last_check: v.get("lastCheck").and_then(Value::as_u64).unwrap_or(0), ready, sha256, attempts, manual }
     }
 
     pub fn to_json(&self) -> Value {
         let ready = self.ready.as_ref().map(|(v, p)| {
-            json!({ "version": v, "path": p.to_string_lossy(), "sha256": self.sha256, "attempts": self.attempts })
+            json!({
+                "version": v, "path": p.to_string_lossy(), "sha256": self.sha256, "attempts": self.attempts,
+                "manual": self.manual,
+            })
         });
         json!({ "lastCheck": self.last_check, "ready": ready })
     }
@@ -302,14 +308,16 @@ fn text(key: &str) -> &'static str {
     let zh = crate::ui::i18n::current().starts_with("zh");
     match (key, zh) {
         ("title", _) => "Filee Rust",
-        ("checking", true) => "正在檢查更新…",
-        ("checking", false) => "Checking for updates…",
-        ("current", true) => "已是最新版",
-        ("current", false) => "You have the latest version",
-        ("downloading", true) => "找到新版，正在下載：",
-        ("downloading", false) => "A new version is downloading: ",
-        ("installing", true) => "正在安裝新版，Filee Rust 馬上會重新啟動：",
-        ("installing", false) => "Installing the new version; Filee Rust restarts in a moment: ",
+        ("checking", true) => "更新中…",
+        ("checking", false) => "Updating…",
+        ("current", true) => "目前已是最新版：",
+        ("current", false) => "You have the latest version: ",
+        ("downloading", true) => "更新中…正在下載 ",
+        ("downloading", false) => "Updating… downloading ",
+        ("installing", true) => "更新中…安裝完會自動重新啟動：",
+        ("installing", false) => "Updating… Filee Rust restarts when it is installed: ",
+        ("updated", true) => "更新完成：",
+        ("updated", false) => "Update complete: ",
         ("after-jobs", true) => "下載好了，轉檔完成後就安裝：",
         ("after-jobs", false) => "Downloaded; it installs once the conversions are done: ",
         ("failed", true) => "檢查更新失敗：",
@@ -340,9 +348,14 @@ pub fn startup() {
     if let (Some((v, path)), Some(current)) = (state.ready.clone(), current_version()) {
         if parse_version(&v) <= parse_version(&current) {
             let _ = std::fs::remove_file(&path);
+            if state.manual {
+                // Posted now, shown once the tray icon is there (the message loop runs after start-up).
+                notify(true, "updated", &current);
+            }
             state.ready = None;
             state.sha256 = None;
             state.attempts = 0;
+            state.manual = false;
             save(&state);
             info!("Updated to {current}");
         } else if state.attempts >= MAX_INSTALL_ATTEMPTS {
@@ -459,8 +472,7 @@ fn check(manual: bool) {
                         log.push(line);
                     }
                     Line::Current(v) => {
-                        let zh = crate::ui::i18n::current().starts_with("zh");
-                        notify(manual, "current", &if zh { format!("（{v}）") } else { format!(" ({v})") });
+                        notify(manual, "current", &v);
                         log.push(line);
                     }
                     Line::Failed(why) => {
@@ -523,6 +535,7 @@ fn install(version: &str, path: &Path, manual: bool) {
         return;
     }
     state.attempts += 1;
+    state.manual = manual;
     save(&state);
     info!("Self-update: installing {version} ({}), attempt {}", path.display(), state.attempts);
     notify(manual, "installing", version);
@@ -638,12 +651,13 @@ mod tests {
             ready: Some(("2.2.0-rust.6".into(), PathBuf::from(r"C:\u\x.exe"))),
             sha256: Some("ab".into()),
             attempts: 2,
+            manual: true,
         };
         assert_eq!(State::from_json(&s.to_json()), s);
         assert_eq!(State::from_json(&json!({})), State::default());
         // A state file from before attempts/sha256 existed still reads.
         let old = State::from_json(&json!({"lastCheck": 1, "ready": {"version": "2.2.0-rust.6", "path": "x"}}));
-        assert_eq!((old.attempts, old.sha256), (0, None));
+        assert_eq!((old.attempts, old.sha256, old.manual), (0, None, false));
     }
 
     #[test]

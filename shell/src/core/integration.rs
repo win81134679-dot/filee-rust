@@ -40,7 +40,7 @@ pub fn apply(settings: &Value) {
 // ---------------------------------------------------------------------------------------------------------------
 // PDF donut groups Filee Rust adds (user's requests 2026-10-29), each once per user:
 // - "merge PDF" (only useful with several files) becomes "轉成 Office" (DOCX, XLSX, PPTX);
-// - "split PDF" becomes "PDF 合併與拆分" (merge, split, page editor, add PDF, compress).
+// - "split PDF" becomes "PDF 工具箱" (merge, split, page editor, add PDF, compress).
 
 /// A group put on the PDF donut in place of one preset.
 pub struct PdfGroup {
@@ -48,6 +48,8 @@ pub struct PdfGroup {
     pub policy: &'static str,
     pub id: &'static str,
     pub name: &'static str,
+    /// Names Filee Rust gave it before: a group still called that is renamed (one the user renamed is not).
+    pub old_names: &'static [&'static str],
     pub members: &'static [&'static str],
     /// The slice it takes the place of (front or back face of the PDF profile).
     pub replaces: &'static str,
@@ -63,13 +65,16 @@ pub const PDF_GROUPS: [PdfGroup; 2] = [
         policy: "pdfOfficeGroup",
         id: PDF_OFFICE_GROUP,
         name: "轉成 Office",
+        old_names: &[],
         members: &["to-docx", "to-xlsx", "to-pptx"],
         replaces: "merge-pdf",
     },
     PdfGroup {
         policy: "pdfToolsGroup",
         id: PDF_TOOLS_GROUP,
-        name: "PDF 合併與拆分",
+        name: "PDF 工具箱",
+        // rust.8 (2026-10-29); renamed at the user's request the same day.
+        old_names: &["PDF 合併與拆分"],
         members: &["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"],
         replaces: "pdf-split",
     },
@@ -90,6 +95,9 @@ pub fn apply_pdf_groups_once() {
     let mut marked = false;
     for group in &PDF_GROUPS {
         if policy.get(group.policy).and_then(Value::as_bool) == Some(true) {
+            if !group.old_names.is_empty() {
+                store::mutate(DataFile::Presets, group.id, Arc::new(|v: &mut Value| rename_pdf_group(v, group)));
+            }
             continue;
         }
         let group_written = store::mutate(DataFile::Presets, group.policy, Arc::new(|v: &mut Value| add_pdf_group(v, group)));
@@ -127,6 +135,18 @@ pub fn add_pdf_group(presets: &mut Value, group: &PdfGroup) -> bool {
     preset["subPresetIds"] = group.members.iter().map(|&s| Value::from(s)).collect();
     list.push(preset);
     true
+}
+
+/// A group Filee Rust added under an earlier name takes the current one.
+pub fn rename_pdf_group(presets: &mut Value, group: &PdfGroup) -> bool {
+    let Some(preset) = presets.as_array_mut().and_then(|a| a.iter_mut().find(|p| p["id"] == group.id)) else {
+        return false;
+    };
+    let named_by_us = preset["name"].as_str().is_some_and(|n| group.old_names.contains(&n));
+    if named_by_us {
+        preset["name"] = group.name.into();
+    }
+    named_by_us
 }
 
 /// In the PDF profile only, the slice `group.replaces` (front or back) becomes the group. Groups that merely contain
@@ -461,11 +481,24 @@ mod tests {
         let (mut presets, _) = library();
         assert!(add_pdf_group(&mut presets, &PDF_GROUPS[1]));
         let group = presets.as_array().unwrap().iter().find(|p| p["id"] == PDF_TOOLS_GROUP).unwrap();
-        assert_eq!(group["name"], "PDF 合併與拆分");
+        assert_eq!(group["name"], "PDF 工具箱");
         assert_eq!(
             group["subPresetIds"],
             serde_json::json!(["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"])
         );
+    }
+
+    #[test]
+    fn the_tools_group_from_rust_8_is_renamed_but_a_users_own_name_stays() {
+        let tools = &PDF_GROUPS[1];
+        let mut presets = serde_json::json!([{"id": PDF_TOOLS_GROUP, "name": "PDF 合併與拆分"}]);
+        assert!(rename_pdf_group(&mut presets, tools));
+        assert_eq!(presets[0]["name"], "PDF 工具箱");
+        assert!(!rename_pdf_group(&mut presets, tools), "renamed once");
+        let mut mine = serde_json::json!([{"id": PDF_TOOLS_GROUP, "name": "我的 PDF"}]);
+        assert!(!rename_pdf_group(&mut mine, tools));
+        assert_eq!(mine[0]["name"], "我的 PDF");
+        assert!(!rename_pdf_group(&mut serde_json::json!([]), tools));
     }
 
     #[test]
