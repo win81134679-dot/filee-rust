@@ -674,7 +674,7 @@ mod tests {
     fn open_button_yields_to_a_long_status_but_stays_on_a_short_one() {
         init_text();
         let mut gfx = Gfx::new(&["Segoe UI".to_string()], "zh-TW").unwrap();
-        let outputs = vec![PathBuf::from(r"C:\out.png")];
+        let outputs = vec![PathBuf::from(r"C:\out\a.png")];
         let mut partial = JobStatus { total: 5, failed: 2, outputs: outputs.clone(), ..job(JobState::CompletedWithErrors) };
         partial.errors = vec!["x — y".into()];
         let kinds = |gfx: &mut Gfx, j: &JobStatus| -> Vec<BtnKind> {
