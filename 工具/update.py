@@ -6,6 +6,7 @@
   python 工具/update.py --to v2.3.0  move to that tag (also older ones), then build
   python 工具/update.py --rebuild  build the current tag again (after a shell/ change)
   python 工具/update.py --save-patch  write upstream/'s changes (new files too) into patches/hosted.patch
+  python 工具/update.py --init     fresh clone: fetch upstream at patches/UPSTREAM_TAG into upstream/, patch on
 
 What it does for a new tag:
   1. git fetch the tag into upstream/ (sparse: src/, docs/, root files; no build scripts are checked out)
@@ -31,6 +32,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = ROOT / "upstream"
 PATCH = ROOT / "patches" / "hosted.patch"
+TAG_FILE = ROOT / "patches" / "UPSTREAM_TAG"  # the upstream tag hosted.patch is written against
+UPSTREAM_URL = "https://github.com/KnifeLemon/Filee.git"
+# Sparse checkout: sources and docs; upstream's build scripts are never checked out (they download and run things).
+SPARSE = ["/src/", "/docs/", "/CHANGELOG.md", "/LICENSE", "/THIRD-PARTY-NOTICES.md", "/README.md", "/README.zh-TW.md",
+          "/Directory.Packages.props", "/Directory.Build.props", "/global.json", "/Filee.slnx", "/.editorconfig",
+          "!*.ps1", "!*.sh", "!*.cmd", "!*.bat"]
 STATE = ROOT / "cache" / "update-state.json"
 DIFFS = ROOT / "docs" / "upstream-diffs"
 REPO = "KnifeLemon/Filee"
@@ -181,6 +188,28 @@ def move_to(new: str) -> None:
     refreshed = patch_text()
     if refreshed.strip():
         PATCH.write_text(refreshed, encoding="utf-8", newline="\n")
+    TAG_FILE.write_text(new + "\n", encoding="utf-8", newline="\n")
+
+
+def init_upstream() -> None:
+    """A fresh clone of this repository has no upstream/: fetch the tag the patch is written against, patch on."""
+    if (UPSTREAM / ".git").exists():
+        raise SystemExit(f"upstream/ is already there (at {current_tag()}); nothing to do")
+    tag = TAG_FILE.read_text(encoding="utf-8").strip()
+    subprocess.run(["git", "init", "-q", str(UPSTREAM)], check=True)
+    git("remote", "add", "origin", UPSTREAM_URL)
+    git("config", "remote.origin.promisor", "true")
+    git("config", "remote.origin.partialclonefilter", "blob:none")
+    git("sparse-checkout", "set", "--no-cone", *SPARSE)
+    print(f"fetching {tag} from {UPSTREAM_URL} (sources only, about 10 MB) …", flush=True)
+    git("fetch", "--depth", "1", "--filter=blob:none", "origin", "tag", tag, "--no-tags")
+    git("-c", "advice.detachedHead=false", "checkout", tag)
+    res = subprocess.run(["git", "-C", str(UPSTREAM), "apply", "--3way", str(PATCH)],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace")
+    git("reset", "-q")
+    if res.returncode != 0:
+        raise SystemExit("FAIL: hosted.patch does not apply to " + tag + "\n" + res.stdout + res.stderr)
+    print(f"upstream/ at {tag} with hosted.patch; next: python 工具/build_release.py")
 
 
 def patch_text() -> str:
@@ -199,6 +228,7 @@ def save_patch() -> None:
     if not text.strip():
         raise SystemExit("FAIL: upstream/ has no changes; hosted.patch left as it is")
     PATCH.write_text(text, encoding="utf-8", newline="\n")
+    TAG_FILE.write_text(current_tag() + "\n", encoding="utf-8", newline="\n")
     print(f"hosted.patch: {sum(1 for l in text.splitlines() if l.startswith('diff --git'))} file(s)")
 
 
@@ -214,7 +244,11 @@ def main() -> int:
     ap.add_argument("--to")
     ap.add_argument("--no-build", action="store_true", help="move + report only (tests the loop)")
     ap.add_argument("--save-patch", action="store_true", help="upstream/ changes → patches/hosted.patch")
+    ap.add_argument("--init", action="store_true", help="fresh clone: fetch upstream at patches/UPSTREAM_TAG")
     args = ap.parse_args()
+    if args.init:
+        init_upstream()
+        return 0
     if args.save_patch:
         save_patch()
         return 0
