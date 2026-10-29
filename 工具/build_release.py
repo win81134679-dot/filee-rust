@@ -8,9 +8,10 @@ Steps (each one stops the build with a message when it fails):
   5. stage   build/stage: portable + patched Filee.dll and Filee.Engines.dll (+pdb/xml), i18n, icon, licenses, README.txt
   6. cargo   shell/ release build → build/stage/filee-rust.exe (cargo test first)
   7. check   filee-cli version, filee-rust --selftest, one real conversion with the staged CLI
-  8. iscc    packaging/FileeRust.iss → dist/FileeRust-<ver>-Setup.exe
+  8. setup   installer/ (our fork of upstream's Filee.Setup) published as one trimmed file, the stage packed into it by
+             installer/tools/make-setup.cs → dist/FileeRust-<ver>-Setup.exe
 
-Usage: python build_release.py [--lite-rev N] [--skip-tests]
+Usage: python build_release.py [--lite-rev N] [--skip-tests] [--setup-only]
 Version: <upstream version>-rust.<N> (N from --lite-rev, default LITE_REV below); file version <upstream>.<N>.
 Raise LITE_REV whenever a changed build goes to other computers, so its installer has a new name.
 """
@@ -27,7 +28,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 6  # 2026-10-29: save-race crash fix and bug sweep (5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix)
+LITE_REV = 7  # 2026-10-29: installer is our fork of upstream's Avalonia Setup, not Inno Setup (6: save-race crash fix and bug sweep; 5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix)
 UPSTREAM = ROOT / "upstream"
 PUBLIC_KEY = ROOT / "packaging" / "update.pub"
 PATCH = ROOT / "patches" / "hosted.patch"
@@ -39,11 +40,8 @@ DIST = ROOT / "dist"
 SHELL = ROOT / "shell"
 PY = sys.executable
 DOTNET = Path(r"C:\Program Files\dotnet\dotnet.exe")
-ISCC_CANDIDATES = [
-    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
-    Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
-    Path(r"C:\Program Files\Inno Setup 6\ISCC.exe"),
-]
+INSTALLER = ROOT / "installer"
+SETUP_PUBLISH = BUILD / "setup-publish"
 REPO = "KnifeLemon/Filee"
 
 
@@ -142,14 +140,14 @@ def portable_base(tag: str) -> Path:
     return extracted
 
 
-def local_path_leaks(folder: Path) -> list[str]:
-    """Files under `folder` naming this project's folder or the user's profile (UTF-8 or UTF-16): the installer goes
-    to other computers and to public releases."""
+def local_path_leaks(folder: Path, suffixes: tuple = ()) -> list[str]:
+    """Files under `folder` (only those ending in `suffixes`, when given) naming this project's folder or the user's
+    profile (UTF-8 or UTF-16): the installer goes to other computers and to public releases."""
     needles = {str(ROOT), str(Path.home())}
     needles = [n.encode(enc) for n in needles for enc in ("utf-8", "utf-16-le")]
     found = []
     for p in folder.rglob("*"):
-        if p.is_file() and p.stat().st_size < 300_000_000:
+        if p.is_file() and (not suffixes or p.suffix.lower() in suffixes) and p.stat().st_size < 300_000_000:
             data = p.read_bytes()
             if any(n in data for n in needles):
                 found.append(str(p.relative_to(folder)))
@@ -211,6 +209,43 @@ def stage(tag: str, portable: Path, exe: Path, app_ver: str) -> None:
         encoding="utf-8")
 
 
+def build_setup(app_ver: str, env: dict) -> Path:
+    """Publish installer/ (one self-contained, trimmed file) and pack the stage into it → dist/FileeRust-<ver>-Setup.exe.
+    The Setup program must not carry this computer's paths either: PathMap, no PDB, and the intermediate (uncompressed)
+    assemblies are scanned too, because the single-file bundle compresses what it holds."""
+    shutil.rmtree(SETUP_PUBLISH, ignore_errors=True)
+    for obj in (INSTALLER / "obj").glob("Release"):
+        shutil.rmtree(obj, ignore_errors=True)  # a full compile: MSBuild doesn't count PathMap as an input
+    run([str(DOTNET), "publish", str(INSTALLER / "FileeRust.Setup.csproj"), "-c", "Release", "-r", "win-x64",
+         "-p:FileeSetupPublish=true", f"-p:Version={app_ver}", f"-p:PathMap={ROOT}=/_", "-p:DebugType=none",
+         "-o", str(SETUP_PUBLISH), "-v:quiet", "-nologo"], env=env, quiet=True)
+    program = SETUP_PUBLISH / "Filee.Setup.exe"
+    if not program.exists():
+        raise Fail("the installer was not published (installer/FileeRust.Setup.csproj)")
+    print(f"Setup program {program.stat().st_size / 1e6:.1f} MB")
+    leaks = local_path_leaks(SETUP_PUBLISH) + local_path_leaks(INSTALLER / "obj" / "Release", (".dll", ".exe"))
+    if leaks:
+        raise Fail("the Setup program names this computer's folders: " + ", ".join(sorted(set(leaks))[:5]))
+    DIST.mkdir(exist_ok=True)
+    setup = DIST / f"FileeRust-{app_ver}-Setup.exe"
+    run([str(DOTNET), "run", str(INSTALLER / "tools" / "make-setup.cs"), "-c", "Release", "--",
+         str(program), str(STAGE), app_ver, str(setup)], env=env, quiet=False)
+    if not setup.exists():
+        raise Fail(f"{setup.name} was not made")
+    leaks = local_path_leaks_file(setup)
+    if leaks:
+        raise Fail(f"{setup.name} names this computer's folders")
+    print("no local paths in the Setup program or its payload (the stage was checked above)")
+    return setup
+
+
+def local_path_leaks_file(path: Path) -> bool:
+    """One file (the finished Setup) naming this project's folder or the user's profile."""
+    data = path.read_bytes()
+    needles = [n.encode(enc) for n in {str(ROOT), str(Path.home())} for enc in ("utf-8", "utf-16-le")]
+    return any(n in data for n in needles)
+
+
 def smoke(tag: str) -> None:
     cli = STAGE / "app" / "filee-cli.exe"
     version = run([str(cli), "version"], quiet=True).strip()
@@ -244,8 +279,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--lite-rev", type=int, default=LITE_REV)
     ap.add_argument("--skip-tests", action="store_true", help="skip cargo test (not for releases)")
+    ap.add_argument("--setup-only", action="store_true",
+                    help="only step 8, on the stage that is there (build/stage/version.txt names its version): for working on installer/")
     args = ap.parse_args()
     try:
+        if args.setup_only:
+            step("8 installer (stage as it is)")
+            app_ver = (STAGE / "version.txt").read_text(encoding="utf-8").strip()
+            env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1")
+            setup = build_setup(app_ver, env)
+            print(f"PASS: {setup} ({setup.stat().st_size / 1e6:.1f} MB)")
+            return 0
         step("1 patch")
         tag = upstream_tag()
         ensure_patch()
@@ -309,15 +353,7 @@ def main() -> int:
         print("no local paths in the stage")
 
         step("8 installer")
-        iscc = next((p for p in ISCC_CANDIDATES if p.exists()), None)
-        if not iscc:
-            raise Fail("Inno Setup 6 (ISCC.exe) not found")
-        DIST.mkdir(exist_ok=True)
-        run([str(iscc), "/Q", f"/DAppVer={app_ver}", f"/DFileVer={file_ver}", f"/DStage={STAGE}",
-             f"/DOutDir={DIST}", str(ROOT / "packaging" / "FileeRust.iss")], quiet=True)
-        setup = DIST / f"FileeRust-{app_ver}-Setup.exe"
-        if not setup.exists():
-            raise Fail(f"{setup.name} was not made")
+        setup = build_setup(app_ver, env)
         manifest = {"upstream": tag, "version": app_ver, "setup": setup.name,
                     "sha256": sha256(setup), "bytes": setup.stat().st_size}
         (DIST / f"FileeRust-{app_ver}.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

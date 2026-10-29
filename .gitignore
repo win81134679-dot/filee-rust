@@ -3,6 +3,8 @@
 /build/
 /dist/
 /shell/target/
+/installer/**/bin/
+/installer/**/obj/
 # The upstream checkout is its own git repository (patches/hosted.patch holds our changes)
 /upstream/
 # Personal notes and local files (not published)

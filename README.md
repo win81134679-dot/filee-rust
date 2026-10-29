@@ -116,12 +116,28 @@ flowchart LR
 
    圖片、資料（CSV、JSON、XML…）、2D 製圖（DXF、DWG）、PDF、向量、3D 模型的轉換都是內建的，不用另外裝。
 
-   按「完成」後 Filee Rust 會自動啟動，並打開設定視窗。最後一頁的「閱讀說明（README）」預設不勾。
-3. 電腦上有原版 Filee 的話，安裝程式會請它先結束。建議之後到「設定 → 應用程式」解除安裝原版，兩個同時開會跳兩個選單。
+   選項在安裝畫面的「Options／選項」面板，預設都勾；「為所有使用者安裝」（要系統管理員）預設不勾，勾了才會跳 UAC。
+   按「完成」後 Filee Rust 會自動啟動，並打開設定視窗（沒有「要不要啟動」的選項，也沒有「閱讀說明」）。
+3. 電腦上有原版 Filee 的話，安裝程式會先提醒，並請它結束。建議之後到「設定 → 應用程式」解除安裝原版，兩個同時開會跳兩個選單。
+   安裝程式只讀原版的登錄項目（找它的資料夾），不會改或刪。
 4. 防毒軟體把 `filee-rust.exe` 擋下或刪掉的話，把安裝資料夾加入信任。它會偵測全域滑鼠鍵盤（只聽不攔），
    沒簽章的程式這樣做容易被誤判。
 
 第一次啟動時，如果這台電腦從沒用過原版 Filee，外殼會請上游寫出它的預設選單，所以一裝好就有完整的選單。
+
+**升級**：直接執行新的安裝檔。以前用 Inno Setup 裝的 Filee Rust（rust.6 以前）用同一個 AppId，會原地升級，
+「設定 → 應用程式」只留一筆；`filee-lite.exe`、開始功能表的「Filee Lite」捷徑和 `FileeLite` 開機項目會被清掉。
+升級時選項畫面顯示的是這台電腦現在的狀態（開機啟動、7-Zip、每週更新），轉換引擎不會重新下載。
+
+**靜默安裝**（給套件管理員；沿用 Inno 的開關）：`Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART [/ALLUSERS] [/DIR="…"]
+[/TASKS="startup,sevenzip,engineupdate"] [/MERGETASKS="!startup"] [/LOG="檔"]`。靜默安裝完**不會**啟動任何東西，
+也不下載引擎；只有 Filee Rust 自己更新時加的 `/SELFUPDATE=1`，才會在最後（不論成功失敗）用 `--background` 把它開回來。
+
+## 解除安裝
+
+「設定 → 應用程式 → Filee Rust」，或執行安裝資料夾裡的 `uninstall.exe`。它會先請 `filee-rust.exe --quit`，然後移除程式檔、
+內建 7-Zip（含每週更新換掉的）、`engine-update.disabled`、開機啟動項目、`HKCU\Software\Classes\*\shell\FileeLite`（右鍵選單）、
+開始功能表捷徑和解除安裝項目。**不動你的資料**：`%APPDATA%\Filee`（設定、預設）、`%LOCALAPPDATA%\FileeLite` 和 Filee 下載的引擎都留著。
 
 ## 使用
 
@@ -253,7 +269,6 @@ Filee Rust 不會回報任何資料，所以只有這個方法知道哪一台是
 - Windows 10／11 x64
 - [Rust](https://rustup.rs/)（MSVC 工具鏈）
 - [.NET 10 SDK](https://dotnet.microsoft.com/)
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 - Python 3、Git
 - Node.js（只有重畫架構圖時需要）
 
@@ -274,7 +289,11 @@ python 工具\build_release.py       # 建置並打包 → dist\FileeRust-<版�
 6. 編譯 Rust 外殼
 7. 組裝
 8. `--selftest`，並真的轉一次 SVG→PNG
-9. 用 Inno Setup 打包
+9. 發佈 `installer\`（上游安裝程式的 fork，單一檔、trim 過），再用 `installer\tools\make-setup.cs` 把組裝好的檔案壓進去；
+   檢查安裝程式本身沒有這台電腦的路徑
+
+只改安裝程式時：`python 工具\build_release.py --setup-only`（沿用 `build\stage`，版本以 `build\stage\version.txt` 為準），
+測試：`dotnet test installer\tests`。
 
 上游的 `build\*.ps1` 等建置腳本不會被 checkout，也不會被執行。
 
@@ -344,7 +363,7 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 | `patches\hosted.patch`、`patches\UPSTREAM_TAG` | 對上游的補丁，與它對應的上游版本 |
 | `packaging\update.pub` | 自動更新驗簽名用的公鑰（私鑰 `keys\` 不在 repo） |
 | `工具\` | `update.py`（閉環）、`build_release.py`（建置封裝）、`publish.py`（簽名發佈）、`test_install.py`（靜默安裝測試）、字型下載、300 DPI、畫圖 |
-| `packaging\` | Inno Setup 腳本與繁中語言檔 |
+| `installer\` | 安裝／解除安裝程式：上游 `src/Filee.Setup`（Avalonia）的 fork，加 `tools\make-setup.cs`（把組裝好的檔案壓進去）與 `tests\` |
 | `docs\spec\` | 移植規格：01 觸發與環形選單、02 資料與轉檔工作、03 通知／系統匣／主題 |
 | `docs\upstream-diffs\` | 每次升版的差異報告 |
 | `docs\架構圖\` | 架構圖 HTML、PNG、PDF |
@@ -363,4 +382,5 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 ## 授權
 
 [MIT](LICENSE)。Filee 本體由 Filee contributors 以 MIT 授權；安裝檔內的 `licenses\` 附上游授權、第三方聲明與補丁全文。
+`installer\` 是上游安裝程式（Filee contributors，MIT）的修改版，授權全文在 `installer\LICENSE-Filee.txt`。
 「Microsoft Office」「Word」「Excel」「PowerPoint」是 Microsoft 的商標，這裡只用來描述功能。

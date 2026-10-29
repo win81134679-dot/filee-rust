@@ -8,7 +8,7 @@
 //! (resuming) and checks size and SHA-256. Filee Rust then runs that installer silently when nothing is converting, no
 //! hosted window is open, the PC is on mains power and nobody touched mouse or keyboard for 2 minutes (by hand: as soon
 //! as nothing is converting). It lets go of its single-instance lock and quits; Setup puts the new files in place and
-//! starts Filee Rust again, whether the install worked or not (packaging/FileeRust.iss, `/SELFUPDATE=1`).
+//! starts Filee Rust again, whether the install worked or not (installer/Program.cs, `/SELFUPDATE=1`).
 //!
 //! Silent: an automatic run that fails is only logged and tried again the next day. Not for: a development build (no
 //! `version.txt` or `update.pub`), an install for all users (Program Files: Setup would need administrator rights),
@@ -140,7 +140,8 @@ pub fn parse_line(line: &str) -> Line {
     }
 }
 
-/// Inno Setup, silent, and `/SELFUPDATE=1` so it starts Filee Rust again at the end.
+/// Silent, in Inno Setup's switches (the installer was Inno Setup up to rust.6, and installer/ takes the same ones), and
+/// `/SELFUPDATE=1` so it starts Filee Rust again at the end.
 pub fn setup_args(log: &Path) -> Vec<String> {
     ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/SELFUPDATE=1"]
         .iter()
@@ -525,7 +526,8 @@ fn install(version: &str, path: &Path, manual: bool) {
     save(&state);
     info!("Self-update: installing {version} ({}), attempt {}", path.display(), state.attempts);
     notify(manual, "installing", version);
-    // Setup refuses to run while the single-instance lock is held (its AppMutex): let go of it first.
+    // Setup closes a running Filee Rust before it copies (and the Inno Setup of rust.6 and older refused to run while
+    // the single-instance lock was held): let go of it first.
     crate::single::release();
     let mut command = std::process::Command::new(path);
     command.args(setup_args(&log)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());

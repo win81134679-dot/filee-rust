@@ -2,12 +2,13 @@
 
   python 工具/test_install.py [--keep]
 
-What it does (nothing outside build/test-install, except what any installer does: Inno Setup unpacks its setup
-program into %TEMP% and writes an uninstall entry under HKCU, which the uninstall at the end removes again):
+What it does (nothing outside build/test-install, except what any installer does: Setup unpacks its own
+program (a self-extracting single file) into %TEMP%\.net and writes an uninstall entry under HKCU, which the uninstall at the end
+removes again; an existing Filee Rust install on this PC would be updated instead, because Setup keeps its folder):
   1. Setup.exe /VERYSILENT /CURRENTUSER /DIR=build\\test-install /TASKS="" (no autostart, no engine download)
   2. filee-rust.exe --selftest → PASS
   3. the installed filee-cli converts an SVG → PNG on a copy of the data (FILEE_DATA_DIR)
-  4. unins000.exe /VERYSILENT (skipped with --keep)
+  4. uninstall.exe /VERYSILENT (skipped with --keep)
 Run it yourself: some antivirus products watch installers that unpack into %TEMP%.
 """
 import argparse
@@ -60,8 +61,8 @@ def main() -> int:
     ok &= converted
 
     if not args.keep:
-        uninstaller = next(TARGET.glob("unins*.exe"), None)
-        if uninstaller:
+        uninstaller = TARGET / "uninstall.exe"
+        if uninstaller.exists():
             subprocess.run([str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
             print("uninstalled")
     print("PASS" if ok else "FAIL")

@@ -1,0 +1,85 @@
+<!--
+  Filee Rust Setup: the installer and uninstaller of Filee Rust (FileeRust-<version>-Setup.exe, uninstall.exe).
+
+  A fork of upstream Filee's own installer, src/Filee.Setup (MIT, Copyright (c) Filee contributors; see
+  ../upstream/LICENSE). Forked rather than patched: it lives here, not in patches/hosted.patch. What changed is
+  listed in README.md next to this file. Its look (Styles/Soft.axaml, SoftPalette, AppLanguages, the logo and the
+  translations) is still upstream's, linked from ../upstream/src.
+
+  tools/make-setup.cs appends the staged product (build/stage) to the published program as a compressed payload.
+  The same program without a payload, copied next to filee-rust.exe as uninstall.exe, is the uninstaller.
+  Published by 工具/build_release.py with -p:FileeSetupPublish=true: one self-contained, trimmed file.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Kept: the avares:// URIs, the namespaces and the "Filee.Setup.exe" development name are upstream's. -->
+    <AssemblyName>Filee.Setup</AssemblyName>
+    <RootNamespace>Filee.Setup</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\upstream\src\Filee.App\Assets\Icons\filee.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Product>Filee Rust Setup</Product>
+    <AssemblyTitle>Filee Rust Setup</AssemblyTitle>
+    <Description>Filee Rust installer (based on Filee by Filee contributors, MIT)</Description>
+  </PropertyGroup>
+
+  <!-- 工具/build_release.py: dotnet publish -c Release -r win-x64 -p:FileeSetupPublish=true -->
+  <PropertyGroup Condition="'$(FileeSetupPublish)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <DebugType>none</DebugType>
+    <!-- ILLink would otherwise write a debug directory into every trimmed library naming linked*.pdb under the build folder. -->
+    <TrimmerRemoveSymbols>true</TrimmerRemoveSymbols>
+    <DebugSymbols>false</DebugSymbols>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <EventSourceSupport>false</EventSourceSupport>
+    <StackTraceSupport>true</StackTraceSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests\**;tools\**" />
+    <EmbeddedResource Remove="tests\**;tools\**" />
+    <None Remove="tests\**;tools\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- LZMA for the payload. -->
+    <PackageReference Include="SharpCompress" />
+  </ItemGroup>
+
+  <!-- Upstream's look, icon and translations, linked from the upstream checkout. -->
+  <ItemGroup>
+    <Compile Include="..\upstream\src\Filee.App\Services\SoftPalette.cs" Link="Shared\SoftPalette.cs" />
+    <Compile Include="..\upstream\src\Filee.App\Services\AppLanguages.cs" Link="Shared\AppLanguages.cs" />
+    <AvaloniaResource Include="..\upstream\src\Filee.App\Styles\Soft.axaml" Link="Styles\Soft.axaml" />
+    <AvaloniaResource Include="..\upstream\src\Filee.App\Assets\Icons\filee.ico" Link="Assets\Icons\filee.ico" />
+    <AvaloniaResource Include="..\upstream\src\Filee.App\Assets\Icons\filee.png" Link="Assets\Icons\filee.png" />
+    <EmbeddedResource Include="..\upstream\src\Filee.App\Assets\i18n\*.json" Link="i18n\%(Filename)%(Extension)" LogicalName="i18n.%(Filename)%(Extension)" />
+    <!-- Our own texts (the product name, the options, the engines): they win over upstream's keys of the same name. -->
+    <EmbeddedResource Include="i18n\*.json" LogicalName="rust.i18n.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FileeRust.Setup.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RepositoryUrl</_Parameter1>
+      <_Parameter2>$(FileeRepositoryUrl)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

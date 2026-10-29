@@ -1,4 +1,4 @@
-//! Where things are. Installed layout (see packaging/FileeRust.iss):
+//! Where things are. Installed layout (see installer/, Setup's payload is build\stage):
 //!
 //! ```text
 //! <install>\filee-rust.exe

@@ -1,0 +1,19 @@
+<!-- Tests of the pure parts of the installer: the command line (Inno switches, /SELFUPDATE=1), the options, the file
+     lists, the registry and file effects of an install and an uninstall (in-memory registry, a fake system, temp folders).
+     Nothing here starts Setup, filee-rust.exe or touches the real registry.  dotnet test installer/tests -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <UseAppHost>false</UseAppHost>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FileeRust.Setup.csproj" />
+  </ItemGroup>
+</Project>

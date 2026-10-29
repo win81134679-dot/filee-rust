@@ -1,0 +1,9 @@
+<!-- Central package management: upstream's versions (../upstream/Directory.Packages.props) apply here too,
+     Microsoft.NET.Test.Sdk and xunit.runner.visualstudio included. The tests use xunit 2 (upstream's xunit.v3 insists on
+     an app host, an .exe, and the tests run as a .dll through `dotnet test`). -->
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)..\upstream\Directory.Packages.props" />
+  <ItemGroup Label="Tests">
+    <PackageVersion Include="xunit" Version="2.9.3" />
+  </ItemGroup>
+</Project>

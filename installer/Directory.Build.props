@@ -1,0 +1,21 @@
+<!--
+  Shared MSBuild settings for the installer (a fork of upstream Filee's src/Filee.Setup, MIT, Filee contributors).
+  Package versions are upstream's own (Directory.Packages.props imports them), so a new upstream tag brings new ones.
+-->
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+    <Version>2.2.0</Version>
+    <Authors>Filee contributors; Filee Rust</Authors>
+    <Copyright>Copyright (c) Filee contributors</Copyright>
+    <!-- The page the uninstall entry's URL points to (Inno Setup's AppPublisherURL). -->
+    <FileeRepositoryUrl>https://github.com/KnifeLemon/Filee</FileeRepositoryUrl>
+    <RepositoryUrl>$(FileeRepositoryUrl)</RepositoryUrl>
+  </PropertyGroup>
+</Project>
