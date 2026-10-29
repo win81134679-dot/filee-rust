@@ -90,6 +90,7 @@ flowchart LR
 | 主題與語言 | 跟上游同一套主題設定與 17 種語言 |
 | 300 DPI | 任何轉成圖片的預設一律 300 DPI（PDF／文件頁面轉圖片的解析度與檔案標記） |
 | PDF 轉 Office | PDF 選單的「轉成 Office」群組：DOCX、XLSX、PPTX（取代只在多選時有用的「合併 PDF」，只改一次，之後照你的設定） |
+| PDF 合併與拆分 | PDF 選單的「PDF 合併與拆分」群組：合併、拆分、頁面編輯、加入 PDF、壓縮（取代原本單獨一格的「拆分 PDF」，只改一次） |
 | Microsoft Office 優先 | Office 文件用你電腦上的 Word／Excel／PowerPoint 轉，不能用時改用 LibreOffice（見下方〈轉換引擎〉） |
 | 每週引擎更新 | 背景靜默更新轉換引擎，不開視窗、不打擾 |
 | 自動更新 | Filee Rust 自己從 GitHub Release 更新到新版（只收發佈者簽過名的版本）；系統匣可手動「檢查更新」 |

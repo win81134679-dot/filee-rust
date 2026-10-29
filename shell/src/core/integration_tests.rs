@@ -433,7 +433,7 @@ fn pdf_donut_has_the_office_group_and_it_converts() {
     let marker = isolated_data_dir().join("filee-rust-policy.json");
     let _ = std::fs::remove_file(&marker);
     load_store();
-    integration::apply_pdf_office_once();
+    integration::apply_pdf_groups_once();
     store::reload_if_changed();
     assert!(marker.exists());
     let pdf = test_file("hosted-test.pdf");
@@ -445,6 +445,15 @@ fn pdf_donut_has_the_office_group_and_it_converts() {
     let kids: Vec<_> = group.children.iter().map(|c| (c.preset_id.as_str(), c.enabled)).collect();
     println!("children {kids:?}");
     assert_eq!(kids.iter().map(|k| k.0).collect::<Vec<_>>(), ["to-docx", "to-xlsx", "to-pptx"]);
+    // And pdf-split gave way to "PDF 合併與拆分".
+    assert!(all.iter().all(|s| s.preset_id != "pdf-split"), "pdf-split is still a slice of the PDF donut");
+    let tools = all.iter().find(|s| s.preset_id == integration::PDF_TOOLS_GROUP).expect("no merge / split group");
+    let tool_kids: Vec<_> = tools.children.iter().map(|c| (c.preset_id.as_str(), c.enabled)).collect();
+    println!("tools {:?}: {tool_kids:?}", tools.label);
+    assert_eq!(
+        tool_kids.iter().map(|k| k.0).collect::<Vec<_>>(),
+        ["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"]
+    );
     let out = out_dir("pdf-office");
     // PDF → XLSX takes tables drawn with lines (upstream's rule), so that one gets a PDF with a ruled table.
     let table = test_file("table-test.pdf");

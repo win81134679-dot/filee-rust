@@ -32,77 +32,115 @@ pub fn apply(settings: &Value) {
     if force_300_dpi() {
         store::mutate(DataFile::Presets, "300dpi", Arc::new(apply_300_dpi));
     }
-    apply_pdf_office_once();
+    apply_pdf_groups_once();
     let enabled = settings.get("contextMenuEnabled").and_then(Value::as_bool).unwrap_or(true);
     apply_context_menu(enabled);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// PDF donut: "merge PDF" (only useful with several files) becomes a group "轉成 Office" (DOCX, XLSX, PPTX)
+// PDF donut groups Filee Rust adds (user's requests 2026-10-29), each once per user:
+// - "merge PDF" (only useful with several files) becomes "轉成 Office" (DOCX, XLSX, PPTX);
+// - "split PDF" becomes "PDF 合併與拆分" (merge, split, page editor, add PDF, compress).
 
-/// Id of the group preset Filee Rust adds (user's request 2026-10-29).
+/// A group put on the PDF donut in place of one preset.
+pub struct PdfGroup {
+    /// Key in `policy.json` that marks it done.
+    pub policy: &'static str,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub members: &'static [&'static str],
+    /// The slice it takes the place of (front or back face of the PDF profile).
+    pub replaces: &'static str,
+}
+
+/// Id of the Office group.
 pub const PDF_OFFICE_GROUP: &str = "lite-pdf-office";
-const PDF_OFFICE_MEMBERS: [&str; 3] = ["to-docx", "to-xlsx", "to-pptx"];
+/// Id of the merge / split group.
+pub const PDF_TOOLS_GROUP: &str = "lite-pdf-tools";
 
-/// Once per user (`policy.json` in Filee Rust's folder): after that, what the user does in upstream's editor stands.
-pub fn apply_pdf_office_once() {
+pub const PDF_GROUPS: [PdfGroup; 2] = [
+    PdfGroup {
+        policy: "pdfOfficeGroup",
+        id: PDF_OFFICE_GROUP,
+        name: "轉成 Office",
+        members: &["to-docx", "to-xlsx", "to-pptx"],
+        replaces: "merge-pdf",
+    },
+    PdfGroup {
+        policy: "pdfToolsGroup",
+        id: PDF_TOOLS_GROUP,
+        name: "PDF 合併與拆分",
+        members: &["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"],
+        replaces: "pdf-split",
+    },
+];
+
+/// Once per user and group (`policy.json` in Filee Rust's folder): after that, what the user does in upstream's
+/// editor stands.
+pub fn apply_pdf_groups_once() {
     // With FILEE_DATA_DIR (development, tests) the marker stays beside that data copy, never in the real folder.
     let marker = match std::env::var_os("FILEE_DATA_DIR") {
         Some(_) => crate::paths::data_dir().join("filee-rust-policy.json"),
         None => crate::paths::lite_dir().join("policy.json"),
     };
     let mut policy = util::read_json_file(&marker).filter(Value::is_object).unwrap_or_else(|| serde_json::json!({}));
-    if policy.get("pdfOfficeGroup").and_then(Value::as_bool) == Some(true) {
-        return;
-    }
     if store::presets().as_array().is_none_or(|a| a.is_empty()) {
         return; // no library yet (seeding failed): try again next start
     }
-    let group_written = store::mutate(DataFile::Presets, "pdf-office-group", Arc::new(add_pdf_office_group));
-    // No group to copy the fields from (an edited library): leave merge-pdf alone rather than point at nothing.
-    let group_exists = store::presets().as_array().is_some_and(|a| a.iter().any(|p| p["id"] == PDF_OFFICE_GROUP));
-    if !group_exists {
-        return;
+    let mut marked = false;
+    for group in &PDF_GROUPS {
+        if policy.get(group.policy).and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let group_written = store::mutate(DataFile::Presets, group.policy, Arc::new(|v: &mut Value| add_pdf_group(v, group)));
+        // No group to copy the fields from (an edited library): leave the slice alone rather than point at nothing.
+        let group_exists = store::presets().as_array().is_some_and(|a| a.iter().any(|p| p["id"] == group.id));
+        if !group_exists {
+            continue;
+        }
+        let swap_written = store::mutate(DataFile::Profiles, group.id, Arc::new(|v: &mut Value| swap_in_pdf_profile(v, group)));
+        // Queued (the settings window is open) or refused: not done yet. The next pass finds the group there and
+        // nothing left to change, and only then is it marked done.
+        if group_written && swap_written {
+            policy[group.policy] = Value::Bool(true);
+            marked = true;
+            info!("PDF donut: {} replaced by the group '{}' (once)", group.replaces, group.name);
+        }
     }
-    let swap_written = store::mutate(DataFile::Profiles, "pdf-office-swap", Arc::new(swap_pdf_merge));
-    // Queued (the settings window is open) or refused: not done yet. The next pass finds the group there and
-    // nothing left to change, and only then is it marked done.
-    if !(group_written && swap_written) {
-        return;
-    }
-    policy["pdfOfficeGroup"] = Value::Bool(true);
-    match util::atomic_write(&marker, util::to_upstream_json(&policy, false).as_bytes()) {
-        Ok(()) => info!("PDF donut: merge-pdf replaced by the Office group (once)"),
-        Err(e) => warn!("Could not write {}: {e}", marker.display()),
+    if marked {
+        if let Err(e) = util::atomic_write(&marker, util::to_upstream_json(&policy, false).as_bytes()) {
+            warn!("Could not write {}: {e}", marker.display());
+        }
     }
 }
 
 /// Adds the group preset, copied from upstream's own `pdf-edit` group so every field upstream expects is there.
-pub fn add_pdf_office_group(presets: &mut Value) -> bool {
+pub fn add_pdf_group(presets: &mut Value, group: &PdfGroup) -> bool {
     let Some(list) = presets.as_array_mut() else { return false };
-    if list.iter().any(|p| p["id"] == PDF_OFFICE_GROUP) {
+    if list.iter().any(|p| p["id"] == group.id) {
         return false;
     }
-    let Some(mut group) = list.iter().find(|p| p["targetFormat"] == "group").cloned() else { return false };
-    group["id"] = PDF_OFFICE_GROUP.into();
-    group["name"] = "轉成 Office".into();
-    group["nameKey"] = "".into();
-    group["subPresetIds"] = PDF_OFFICE_MEMBERS.iter().map(|&s| Value::from(s)).collect();
-    list.push(group);
+    let Some(mut preset) = list.iter().find(|p| p["targetFormat"] == "group").cloned() else { return false };
+    preset["id"] = group.id.into();
+    preset["name"] = group.name.into();
+    preset["nameKey"] = "".into();
+    preset["subPresetIds"] = group.members.iter().map(|&s| Value::from(s)).collect();
+    list.push(preset);
     true
 }
 
-/// In the PDF profile only, `merge-pdf` (front or back) becomes the group.
-pub fn swap_pdf_merge(profiles: &mut Value) -> bool {
+/// In the PDF profile only, the slice `group.replaces` (front or back) becomes the group. Groups that merely contain
+/// that preset (upstream's `pdf-edit` holds `pdf-split`) are left as they are.
+pub fn swap_in_pdf_profile(profiles: &mut Value, group: &PdfGroup) -> bool {
     let Some(pdf) = profiles.as_array_mut().and_then(|a| a.iter_mut().find(|p| p["id"] == "pdf")) else { return false };
     let mut changed = false;
     for face in ["presetIds", "backPresetIds"] {
         if let Some(ids) = pdf.get_mut(face).and_then(Value::as_array_mut) {
-            if ids.iter().any(|i| i == PDF_OFFICE_GROUP) {
+            if ids.iter().any(|i| i == group.id) {
                 return false;
             }
-            for id in ids.iter_mut().filter(|i| *i == "merge-pdf") {
-                *id = PDF_OFFICE_GROUP.into();
+            for id in ids.iter_mut().filter(|i| *i == group.replaces) {
+                *id = group.id.into();
                 changed = true;
             }
         }
@@ -404,7 +442,8 @@ mod tests {
     #[test]
     fn pdf_office_group_is_built_from_upstreams_own_group() {
         let (mut presets, _) = library();
-        assert!(add_pdf_office_group(&mut presets));
+        let office = &PDF_GROUPS[0];
+        assert!(add_pdf_group(&mut presets, office));
         let group = presets.as_array().unwrap().iter().find(|p| p["id"] == PDF_OFFICE_GROUP).unwrap();
         assert_eq!(group["targetFormat"], "group");
         assert_eq!(group["kind"], "Group");
@@ -414,23 +453,42 @@ mod tests {
         // Fields upstream needs on every preset come from the template.
         assert_eq!(group["image"]["quality"], 90);
         // Once there, nothing changes.
-        assert!(!add_pdf_office_group(&mut presets));
+        assert!(!add_pdf_group(&mut presets, office));
     }
 
     #[test]
-    fn pdf_profile_swaps_merge_for_the_office_group_only() {
+    fn pdf_tools_group_holds_merge_split_and_the_page_tools() {
+        let (mut presets, _) = library();
+        assert!(add_pdf_group(&mut presets, &PDF_GROUPS[1]));
+        let group = presets.as_array().unwrap().iter().find(|p| p["id"] == PDF_TOOLS_GROUP).unwrap();
+        assert_eq!(group["name"], "PDF 合併與拆分");
+        assert_eq!(
+            group["subPresetIds"],
+            serde_json::json!(["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"])
+        );
+    }
+
+    #[test]
+    fn both_groups_take_their_slices_on_the_pdf_profile_only() {
         let (_, mut profiles) = library();
-        assert!(swap_pdf_merge(&mut profiles));
-        assert_eq!(profiles[1]["presetIds"], serde_json::json!(["to-png", "to-docx", "pdf-split", PDF_OFFICE_GROUP]));
+        assert!(swap_in_pdf_profile(&mut profiles, &PDF_GROUPS[0]));
+        assert!(swap_in_pdf_profile(&mut profiles, &PDF_GROUPS[1]));
+        assert_eq!(profiles[1]["presetIds"], serde_json::json!(["to-png", "to-docx", PDF_TOOLS_GROUP, PDF_OFFICE_GROUP]));
+        // Upstream's pdf-edit group on the back still holds pdf-split; it is a member there, not a slice.
+        assert_eq!(profiles[1]["backPresetIds"], serde_json::json!(["pdf-edit"]));
         // Other profiles keep merge-pdf (multi-select merges of pictures).
         assert_eq!(profiles[0]["presetIds"][1], "merge-pdf");
-        assert!(!swap_pdf_merge(&mut profiles));
+        // Done once: nothing changes the second time.
+        assert!(!swap_in_pdf_profile(&mut profiles, &PDF_GROUPS[0]));
+        assert!(!swap_in_pdf_profile(&mut profiles, &PDF_GROUPS[1]));
     }
 
     #[test]
-    fn pdf_profile_without_merge_is_left_alone() {
+    fn pdf_profile_without_the_slice_is_left_alone() {
         let mut profiles = serde_json::json!([{"id":"pdf","presetIds":["to-png"]}]);
-        assert!(!swap_pdf_merge(&mut profiles));
-        assert!(!swap_pdf_merge(&mut Value::Null));
+        for group in &PDF_GROUPS {
+            assert!(!swap_in_pdf_profile(&mut profiles, group));
+            assert!(!swap_in_pdf_profile(&mut Value::Null, group));
+        }
     }
 }
