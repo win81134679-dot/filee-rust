@@ -91,6 +91,7 @@ flowchart LR
 | 300 DPI | 任何轉成圖片的預設一律 300 DPI（PDF／文件頁面轉圖片的解析度與檔案標記） |
 | PDF 轉 Office | PDF 選單的「轉成 Office」群組：DOCX、XLSX、PPTX（取代只在多選時有用的「合併 PDF」，只改一次，之後照你的設定） |
 | PDF 工具箱 | PDF 選單的「PDF 工具箱」群組：合併、拆分、頁面編輯、加入 PDF、壓縮（取代原本單獨一格的「拆分 PDF」，只改一次） |
+| 不動自訂選單 | 更新帶來的新群組只加到**沒被你改過**的 PDF 選單（上游預設，或只多了上面這兩個群組）；你自己排過的選單（移動、增刪任何一格）一律不動，以後的更新也不再試 |
 | Microsoft Office 優先 | Office 文件用你電腦上的 Word／Excel／PowerPoint 轉，不能用時改用 LibreOffice（見下方〈轉換引擎〉） |
 | 每週引擎更新 | 背景靜默更新轉換引擎，不開視窗、不打擾 |
 | 自動更新 | Filee Rust 自己從 GitHub Release 更新到新版（只收發佈者簽過名的版本）；系統匣可手動「檢查更新」 |
@@ -207,8 +208,11 @@ Filee Rust 會自己更新，使用者不用重裝：
 - 系統匣的「檢查更新」是手動版：會用通知回報結果，有新版就馬上下載並安裝（轉檔中會等轉完）。
 - 每台第一次啟動時產生一組隨機的**本機識別碼**（例如 `K7Q2-9XMA`，由亂數產生，不是從電腦名稱算出來的）。
   系統匣右鍵的「檢查更新」下面就是它，旁邊附這台的電腦名稱。點一下會複製一行：
-  `Filee Rust 本機識別碼 K7Q2-9XMA（電腦 PC-ALICE，使用者 alice，版本 2.2.0-rust.5）`，
+  `Filee Rust 本機識別碼 K7Q2-9XMA（電腦 PC-ALICE，使用者 alice，版本 1.9）`，
   同事貼給發佈者，發佈者就知道這組識別碼是哪一台。電腦名稱只在本機顯示，不會上傳，也不會寫進 Release。
+- **版本號**：從 v1.9 起是 Filee Rust 自己的「主版.次版」（1.9 → 1.10 → … → 2.0），比以前的 `2.2.0-rust.N`（上游版本＋第幾版）都新。
+  以前裝的 rust.7–9 只看得懂舊格式，所以 `update.json` 的 `version` 寫給它們看的 `2.2.0-rust.10`，新版本身寫在 `release`（`1.9`）；
+  舊版照樣會自己更新到 v1.9，之後就都看 `release`。
 - 不自動更新的情況：
   - 裝成「所有使用者」（Program Files），因為更新要系統管理員權限
   - 自己從原始碼編的開發版（沒有 `version.txt`）
@@ -226,13 +230,13 @@ uv run 工具\publish.py new-key --generate-password  # 亂數密碼存在 keys\
 
 把整個 `keys\` 資料夾另外存一份到隨身碟。**私鑰弄丟，已安裝的電腦就再也收不到更新**，只能每台手動重裝。
 
-每次發佈（在自己電腦試過新的安裝檔之後）：
+每次發佈（在自己電腦試過新的安裝檔之後）：先把 `工具\build_release.py` 的 `VERSION` 加一（1.9 → 1.10），版本號沒變的話已安裝的電腦不會更新。
 
 ```powershell
 python 工具\build_release.py                         # 建出 dist\FileeRust-<版本>-Setup.exe
 python 工具\update.py --publish                      # 給每一台：簽名、以預先發行版上傳 GitHub Release
 python 工具\update.py --publish --machines K7Q2-9XMA # 只給這幾台（逗號分隔；也可以用 工具\machines.json 裡的名字）
-python 工具\update.py --open v2.2.0-rust.6           # 之前只給幾台的版本，開放給每一台
+python 工具\update.py --open v1.9                     # 之前只給幾台的版本，開放給每一台
 ```
 
 `工具\machines.json`（不進 git）記你自己的對照，例如 `{"王老師": "K7Q2-9XMA"}`，之後 `--machines 王老師` 就好。
@@ -277,7 +281,7 @@ Filee Rust 不會回報任何資料，所以只有這個方法知道哪一台是
 git clone https://github.com/win81134679-dot/filee-rust
 cd filee-rust
 python 工具\update.py --init       # 抓上游原始碼（patches\UPSTREAM_TAG 記的版本，約 10 MB）並套上補丁
-python 工具\build_release.py       # 建置並打包 → dist\FileeRust-<版本>-rust.<N>-Setup.exe
+python 工具\build_release.py       # 建置並打包 → dist\FileeRust-<版本>-Setup.exe（版本是 VERSION，例如 1.9）
 ```
 
 `build_release.py` 一條指令做完：

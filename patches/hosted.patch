@@ -118,7 +118,7 @@ index 5d55510..5450c8b 100644
    "profile.images": "圖片",
    "profile.pdf": "PDF",
 diff --git a/src/Filee.App/Program.cs b/src/Filee.App/Program.cs
-index 50e1fde..8c0ace9 100644
+index 50e1fde..bac3274 100644
 --- a/src/Filee.App/Program.cs
 +++ b/src/Filee.App/Program.cs
 @@ -11,6 +11,7 @@
@@ -142,7 +142,7 @@ index 50e1fde..8c0ace9 100644
          Elevation = Filee.Platform.Windows.Elevation.Probe();
          var startup = StartupDiagnostics.Describe(UpdateService.CurrentVersion, Environment.ProcessPath,
              StartupDiagnostics.InstallKind(UpdateService.IsInstalled, UpdateService.IsReleaseBuild), Elevation,
-@@ -307,3 +314,402 @@ public static AppBuilder BuildAvaloniaApp()
+@@ -307,3 +314,415 @@ public static AppBuilder BuildAvaloniaApp()
  internal sealed class FileeFontCollection() : Avalonia.Media.Fonts.EmbeddedFontCollection(
      new Uri("fonts:Filee", UriKind.Absolute),
      new Uri("avares://Filee/Assets/Fonts", UriKind.Absolute));
@@ -184,7 +184,9 @@ index 50e1fde..8c0ace9 100644
 +/// its installer (resuming a partial download) and checks it. Every release carries <c>update.json</c> (version,
 +/// installer name, size, SHA-256, optional list of machine ids) and <c>update.sig</c> (ECDSA P-256 / SHA-256 over the
 +/// exact bytes of update.json, DER, base64), signed with the publisher's key; the public key ships with filee-rust.exe.
-+/// Nothing unsigned, older or meant for other machines is taken. Inputs (environment): FILEE_RUST_UPDATE_REPO
++/// Nothing unsigned, older or meant for other machines is taken. Versions are Filee Rust's own from 1.9 on ("1.9" in
++/// <c>release</c>); <c>version</c> then holds an old-style <c>2.2.0-rust.N</c> for the copies up to 2.2.0-rust.9.
++/// Inputs (environment): FILEE_RUST_UPDATE_REPO
 +/// (owner/repo), FILEE_RUST_CURRENT (version), FILEE_RUST_MACHINE (this machine's id), FILEE_RUST_UPDATE_KEY (public
 +/// key PEM file), FILEE_RUST_UPDATE_DIR (download folder); FILEE_RUST_UPDATE_API (tests: another API base, may be http).
 +/// Output, one line each: <c>current &lt;v&gt;</c> | <c>available &lt;v&gt;</c> | <c>progress &lt;done&gt; &lt;total&gt;</c> |
@@ -194,6 +196,8 @@ index 50e1fde..8c0ace9 100644
 +{
 +    private static readonly System.Text.RegularExpressions.Regex VersionPattern =
 +        new(@"^(\d+)\.(\d+)\.(\d+)-(?:rust|lite)\.(\d+)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
++    private static readonly System.Text.RegularExpressions.Regex OwnVersionPattern =
++        new(@"^(\d+)\.(\d+)(?:\.(\d+))?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 +
 +    public static int Run(ILogger log)
 +    {
@@ -209,16 +213,24 @@ index 50e1fde..8c0ace9 100644
 +        }
 +    }
 +
-+    /// <summary>Version as (upstream major, minor, patch, Filee Rust revision); null when it is not one.</summary>
++    /// <summary>
++    /// Version as comparable numbers: (1, major, minor, patch, 0) for Filee Rust's own "1.9" / "1.9.2", newer than every
++    /// (0, upstream major, minor, patch, Filee Rust revision) of a "2.2.0-rust.9"; null when it is neither
++    /// (filee-rust.exe's core::self_update::parse_version).
++    /// </summary>
 +    internal static int[]? ParseVersion(string? text)
 +    {
-+        var m = VersionPattern.Match((text ?? "").Trim());
-+        return m.Success ? [.. m.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).Select(g => int.Parse(g.Value))] : null;
++        text = (text ?? "").Trim();
++        if (OwnVersionPattern.Match(text) is { Success: true } own)
++            return [1, int.Parse(own.Groups[1].Value), int.Parse(own.Groups[2].Value),
++                    own.Groups[3].Success ? int.Parse(own.Groups[3].Value) : 0, 0];
++        var m = VersionPattern.Match(text);
++        return m.Success ? [0, .. m.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).Select(g => int.Parse(g.Value))] : null;
 +    }
 +
 +    internal static int Compare(int[] a, int[] b)
 +    {
-+        for (var i = 0; i < 4; i++)
++        for (var i = 0; i < 5; i++)
 +            if (a[i] != b[i])
 +                return a[i].CompareTo(b[i]);
 +        return 0;
@@ -247,7 +259,8 @@ index 50e1fde..8c0ace9 100644
 +    private static async Task<int> RunAsync(ILogger log)
 +    {
 +        var repo = Need("FILEE_RUST_UPDATE_REPO");
-+        var current = ParseVersion(Need("FILEE_RUST_CURRENT")) ?? throw new InvalidOperationException("FILEE_RUST_CURRENT is not a version");
++        var currentText = Need("FILEE_RUST_CURRENT").Trim();
++        var current = ParseVersion(currentText) ?? throw new InvalidOperationException("FILEE_RUST_CURRENT is not a version");
 +        var machine = Need("FILEE_RUST_MACHINE").Trim();
 +        var publicKey = await File.ReadAllTextAsync(Need("FILEE_RUST_UPDATE_KEY"));
 +        var folder = Need("FILEE_RUST_UPDATE_DIR");
@@ -256,7 +269,7 @@ index 50e1fde..8c0ace9 100644
 +        Directory.CreateDirectory(folder);
 +
 +        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-+        http.DefaultRequestHeaders.UserAgent.ParseAdd($"FileeRust/{string.Join('.', current)}");
++        http.DefaultRequestHeaders.UserAgent.ParseAdd($"FileeRust/{currentText}");
 +        http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 +
 +        using var releases = System.Text.Json.JsonDocument.Parse(await http.GetStringAsync($"{api}/repos/{repo}/releases?per_page=10"));
@@ -281,7 +294,7 @@ index 50e1fde..8c0ace9 100644
 +            }
 +            using var doc = System.Text.Json.JsonDocument.Parse(manifest);
 +            var root = doc.RootElement;
-+            var text = root.GetProperty("version").GetString() ?? "";
++            var text = (root.TryGetProperty("release", out var own) ? own : root.GetProperty("version")).GetString() ?? "";
 +            if (ParseVersion(text) is not { } version || Compare(version, current) <= 0)
 +                continue;
 +            if (root.TryGetProperty("machines", out var machines) && machines.ValueKind == System.Text.Json.JsonValueKind.Array
@@ -298,7 +311,7 @@ index 50e1fde..8c0ace9 100644
 +        }
 +        if (best is not { } b)
 +        {
-+            Console.WriteLine($"current {string.Join('.', current[..3])}-rust.{current[3]}");
++            Console.WriteLine($"current {currentText}");
 +            return 0;
 +        }
 +        Console.WriteLine($"available {b.Text}");

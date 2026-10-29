@@ -11,9 +11,11 @@ Steps (each one stops the build with a message when it fails):
   8. setup   installer/ (our fork of upstream's Filee.Setup) published as one trimmed file, the stage packed into it by
              installer/tools/make-setup.cs → dist/FileeRust-<ver>-Setup.exe
 
-Usage: python build_release.py [--lite-rev N] [--skip-tests] [--setup-only]
-Version: <upstream version>-rust.<N> (N from --lite-rev, default LITE_REV below); file version <upstream>.<N>.
-Raise LITE_REV whenever a changed build goes to other computers, so its installer has a new name.
+Usage: python build_release.py [--version 1.10] [--skip-tests] [--setup-only]
+Version: Filee Rust's own major.minor (VERSION below; 2026-10-29: 「版本號我想改v1.9」). Up to rust.9 it was
+<upstream version>-rust.<N>; installed copies of those still update (工具/publish.py, LEGACY_VERSION).
+Raise VERSION (1.9 → 1.10 → …) whenever a changed build goes to other computers, so its installer has a new name and
+installed copies see it as newer.
 """
 import argparse
 import hashlib
@@ -28,7 +30,10 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 9  # 2026-10-29: PDF toolbox name, update notices (8: PDF merge / split group, 7: installer is our fork of upstream's Avalonia Setup, not Inno Setup (6: save-race crash fix and bug sweep; 5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix))
+VERSION = "1.9"  # 2026-10-29: own version numbers; a PDF donut the user arranged gets no new groups
+# Before: 2.2.0-rust.9 PDF toolbox name, update notices; 8 PDF merge / split group; 7 installer is our fork of upstream's
+# Avalonia Setup; 6 save-race crash fix and bug sweep; 5 self-update; 4 renamed to Filee Rust; 3 PDF Office group;
+# 2 empty-donut fix.
 UPSTREAM = ROOT / "upstream"
 PUBLIC_KEY = ROOT / "packaging" / "update.pub"
 PATCH = ROOT / "patches" / "hosted.patch"
@@ -277,7 +282,7 @@ def smoke(tag: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lite-rev", type=int, default=LITE_REV)
+    ap.add_argument("--version", default=VERSION, help="Filee Rust's version, major.minor (default VERSION)")
     ap.add_argument("--skip-tests", action="store_true", help="skip cargo test (not for releases)")
     ap.add_argument("--setup-only", action="store_true",
                     help="only step 8, on the stage that is there (build/stage/version.txt names its version): for working on installer/")
@@ -293,9 +298,9 @@ def main() -> int:
         step("1 patch")
         tag = upstream_tag()
         ensure_patch()
-        version = tag[1:]
-        app_ver = f"{version}-rust.{args.lite_rev}"
-        file_ver = f"{version}.{args.lite_rev}"
+        if not re.fullmatch(r"\d+\.\d+(\.\d+)?", args.version):
+            raise Fail(f"--version {args.version!r} is not major.minor (1.10) or major.minor.patch")
+        app_ver = args.version
 
         step("2 fonts")
         run([PY, "-I", "-X", "utf8", str(ROOT / "工具" / "fetch_upstream_fonts.py")])

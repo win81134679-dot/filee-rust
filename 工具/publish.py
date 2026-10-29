@@ -9,13 +9,16 @@
   uv run 工具/publish.py new-key --generate-password  same, with a random password kept in keys/ (never asks again)
   uv run 工具/publish.py publish                     newest dist/FileeRust-*-Setup.exe → a GitHub pre-release
   uv run 工具/publish.py publish --machines A,B      only these machines take it (ids or names from machines.json)
-  uv run 工具/publish.py open v2.2.0-rust.5          open an earlier targeted release to every machine
+  uv run 工具/publish.py open v1.9                   open an earlier targeted release to every machine
   uv run 工具/publish.py publish --dry-run           sign into build/publish/ only, nothing is uploaded
 (python 工具/update.py --publish … runs this the same way.)
 
 A release carries the installer, update.json (version, installer name, size, SHA-256, machines or null) and update.sig
-(ECDSA P-256 / SHA-256 over the exact bytes of update.json, DER, base64). filee-rust.exe takes only a release signed by
-the key whose public half is packaging/update.pub (it ships in the installer), newer than itself and meant for it.
+(ECDSA P-256 / SHA-256 over the exact bytes of update.json, DER, base64). Versions are Filee Rust's own from v1.9 on
+(2026-10-29: 「版本號我想改v1.9」): update.json then says "release": "1.9" for copies from v1.9 on, and
+"version": LEGACY_VERSION for the ones up to 2.2.0-rust.9, which read only "version" and only as <upstream>-rust.<N>.
+filee-rust.exe takes only a release signed by the key whose public half is packaging/update.pub (it ships in the
+installer), newer than itself and meant for it.
 
 The private key is keys/update-signing.pem (not in git), encrypted with a password. Keep a copy of keys/ on a USB stick:
 without it, installed copies can never be updated again (only reinstalled by hand). The password comes from
@@ -46,7 +49,10 @@ PASSWORD_FILE = ROOT / "keys" / "update-signing-password.txt"
 MACHINES = ROOT / "工具" / "machines.json"
 OUT = ROOT / "build" / "publish"
 REPO = "win81134679-dot/filee-rust"
-SETUP = re.compile(r"^FileeRust-(\d+\.\d+\.\d+-rust\.\d+)-Setup\.exe$")
+SETUP = re.compile(r"^FileeRust-(\d+\.\d+(?:\.\d+)?|\d+\.\d+\.\d+-rust\.\d+)-Setup\.exe$")
+# Newer than every 2.2.0-rust.N that was released (the last was rust.9): what those copies see (shell's
+# core::self_update::LEGACY_VERSION). It need not grow: they only have to take the first release after them.
+LEGACY_VERSION = "2.2.0-rust.10"
 MACHINE_ID = re.compile(r"^[0-9A-Z]{4}-[0-9A-Z]{4}$")
 
 
@@ -128,7 +134,8 @@ def newest_setup(dist: Path) -> tuple[Path, str]:
 
 def manifest_bytes(version: str, setup: Path, machines: list[str] | None) -> bytes:
     data = setup.read_bytes()
-    doc = {"version": version, "file": setup.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+    head = {"version": version} if "-" in version else {"version": LEGACY_VERSION, "release": version}
+    doc = {**head, "file": setup.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
            "machines": machines}
     return (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 

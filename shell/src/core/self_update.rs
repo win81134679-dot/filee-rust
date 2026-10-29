@@ -29,6 +29,9 @@ use crate::{info, warn};
 
 /// Where releases come from (public: the repository and the public key are not secrets).
 pub const REPO: &str = "win81134679-dot/filee-rust";
+/// What `update.json` says in `"version"` from v1.9 on (工具/publish.py writes it): Filee Rust up to 2.2.0-rust.9 reads
+/// only that field and only that shape, so a release must be newer in it to reach them. This copy reads `"release"`.
+pub const LEGACY_VERSION: &str = "2.2.0-rust.10";
 const DAY: u64 = 24 * 3600;
 const IDLE_BEFORE_INSTALL_MS: u32 = 2 * 60 * 1000;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -46,13 +49,26 @@ const MAX_INSTALL_ATTEMPTS: u32 = 3;
 
 // ------------------------------------------------------------------------------------------------- pure parts
 
-/// `2.2.0-rust.5` (or a Filee Lite `2.2.0-lite.3`) as comparable numbers.
-pub fn parse_version(text: &str) -> Option<[u32; 4]> {
-    let (upstream, rev) = text.trim().split_once('-')?;
-    let rev = rev.strip_prefix("rust.").or_else(|| rev.strip_prefix("lite."))?;
-    let mut parts = upstream.split('.').map(|p| p.parse::<u32>().ok());
-    let v = [parts.next()??, parts.next()??, parts.next()??, rev.parse().ok()?];
-    parts.next().is_none().then_some(v)
+/// A version as comparable numbers. Filee Rust's own `1.9` (major.minor, or major.minor.patch; from 2026-10-29,
+/// 「版本號我想改v1.9」) is newer than every earlier one, which named the upstream version: `2.2.0-rust.9` (or a
+/// Filee Lite `2.2.0-lite.3`). The first number tells the two apart.
+pub fn parse_version(text: &str) -> Option<[u32; 5]> {
+    let text = text.trim();
+    let numbers = |s: &str| s.split('.').map(|p| p.parse::<u32>().ok()).collect::<Option<Vec<_>>>();
+    match text.split_once('-') {
+        None => match numbers(text)?.as_slice() {
+            &[major, minor] => Some([1, major, minor, 0, 0]),
+            &[major, minor, patch] => Some([1, major, minor, patch, 0]),
+            _ => None,
+        },
+        Some((upstream, rev)) => {
+            let rev = rev.strip_prefix("rust.").or_else(|| rev.strip_prefix("lite."))?;
+            match numbers(upstream)?.as_slice() {
+                &[a, b, c] => Some([0, a, b, c, rev.parse().ok()?]),
+                _ => None,
+            }
+        }
+    }
 }
 
 /// `XXXX-XXXX` from 40 bits of `seed`.
@@ -560,13 +576,27 @@ mod tests {
 
     #[test]
     fn versions_compare_upstream_first_then_our_revision() {
-        assert_eq!(parse_version("2.2.0-rust.5"), Some([2, 2, 0, 5]));
-        assert_eq!(parse_version("2.2.0-lite.3"), Some([2, 2, 0, 3]));
+        assert_eq!(parse_version("2.2.0-rust.5"), Some([0, 2, 2, 0, 5]));
+        assert_eq!(parse_version("2.2.0-lite.3"), Some([0, 2, 2, 0, 3]));
         assert!(parse_version("2.2.0-rust.5") > parse_version("2.2.0-lite.4"));
         assert!(parse_version("2.3.0-rust.1") > parse_version("2.2.0-rust.9"));
-        for bad in ["", "2.2.0", "2.2-rust.1", "2.2.0-beta.1", "2.2.0-rust.x", "2.2.0.1-rust.1"] {
+        for bad in ["", "2", "2.2-rust.1", "2.2.0-beta.1", "2.2.0-rust.x", "2.2.0.1-rust.1", "v1.9", "1.9.0.1", "1.x"] {
             assert_eq!(parse_version(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn our_own_version_numbers_are_newer_than_the_upstream_named_ones() {
+        assert_eq!(parse_version("1.9"), Some([1, 1, 9, 0, 0]));
+        assert_eq!(parse_version(" 1.9.2 "), Some([1, 1, 9, 2, 0]));
+        assert!(parse_version("1.9") > parse_version("2.2.0-rust.9"));
+        assert!(parse_version("1.9") > parse_version("99.0.0-rust.99"));
+        assert!(parse_version("1.10") > parse_version("1.9"));
+        assert!(parse_version("2.0") > parse_version("1.10"));
+        assert!(parse_version("1.9.1") > parse_version("1.9"));
+        // rust.9 installs v1.9 under its old-style number (update.json "version"); the new copy counts that as done.
+        assert!(parse_version(LEGACY_VERSION) <= parse_version("1.9"));
+        assert!(parse_version(LEGACY_VERSION) > parse_version("2.2.0-rust.9"));
     }
 
     #[test]

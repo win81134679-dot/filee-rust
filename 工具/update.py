@@ -9,7 +9,7 @@
   python 工具/update.py --init     fresh clone: fetch upstream at patches/UPSTREAM_TAG into upstream/, patch on
   python 工具/update.py --publish [--machines A,B]  sign the newest dist/ installer, upload it as a GitHub
                                    pre-release; installed copies update themselves (工具/publish.py, asks the password)
-  python 工具/update.py --open v2.2.0-rust.5        open a release made for some machines to every machine
+  python 工具/update.py --open v1.9               open a release made for some machines to every machine
 
 What it does for a new tag:
   1. git fetch the tag into upstream/ (sparse: src/, docs/, root files; no build scripts are checked out)
@@ -18,7 +18,7 @@ What it does for a new tag:
      "patched files" (patches/hosted.patch touches them: conflicts show up here) and "follows by itself"
      (engines, tools, translations: they come with the rebuilt upstream, nothing to port)
   3. take hosted.patch off, check out the new tag, put the patch back on (3-way; a conflict stops here)
-  4. 工具/build_release.py → dist/FileeRust-<new>-rust.<LITE_REV>-Setup.exe
+  4. 工具/build_release.py → dist/FileeRust-<VERSION>-Setup.exe (raise VERSION there before a new upstream goes out)
 Exit codes: 0 done (nothing for a person to look at), 2 built but the report lists shell changes to port,
 1 failed (message says where), 10 (--check) a newer release exists.
 State: cache/update-state.json (last check date, last built tag) so the GitHub API is asked once a day at most.

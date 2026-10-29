@@ -41,6 +41,8 @@ pub fn apply(settings: &Value) {
 // PDF donut groups Filee Rust adds (user's requests 2026-10-29), each once per user:
 // - "merge PDF" (only useful with several files) becomes "轉成 Office" (DOCX, XLSX, PPTX);
 // - "split PDF" becomes "PDF 工具箱" (merge, split, page editor, add PDF, compress).
+// A PDF donut the user arranged themselves is left as it is (2026-10-29: 「User自訂選單就不要幫它更新選單了」): a group
+// still to come is added only while the donut is one Filee Rust knows, upstream's or upstream's with our groups.
 
 /// A group put on the PDF donut in place of one preset.
 pub struct PdfGroup {
@@ -80,8 +82,46 @@ pub const PDF_GROUPS: [PdfGroup; 2] = [
     },
 ];
 
+/// The PDF donut upstream 2.2.0 ships (`BuiltInData.PdfDonut`) and the one of its settings schema 9 to 17
+/// (`PdfDonutBefore18`, which upstream itself still replaces when untouched). The integration test
+/// `first_run_without_library_files_still_fills_the_donut` compares them with what a new upstream writes.
+pub const PDF_FRONT_DEFAULTS: [&[&str]; 2] = [
+    &["to-png", "to-jpg", "pdf-long-image", "to-docx", "pdf-slides", "to-txt", "to-md", "to-epub", "to-hwpx", "to-hwp",
+      "pdf-split", "merge-pdf"],
+    &["to-png", "to-jpg", "pdf-long-image", "to-docx", "to-txt", "to-md", "to-epub", "to-hwpx", "to-hwp", "to-tiff",
+      "pdf-split", "merge-pdf"],
+];
+/// The back face of upstream's PDF donut.
+pub const PDF_BACK_DEFAULT: &[&str] = &["pdf-edit", "compress-pdf", "to-webp", "to-tiff", "to-html", "to-odt", "to-rtf",
+    "to-azw3", "to-cbz", "remove-metadata", "zip-all"];
+/// The `policy.json` value of a group left out because the user had arranged the PDF donut.
+pub const KEPT_USERS_DONUT: &str = "kept the user's own PDF donut";
+
+/// Whether the PDF donut is still one Filee Rust knows: an upstream default with any of [`PDF_GROUPS`] swapped in.
+/// None without a PDF profile (nothing to decide yet).
+pub fn pdf_donut_untouched(profiles: &Value) -> Option<bool> {
+    let pdf = profiles.as_array()?.iter().find(|p| p["id"] == "pdf")?;
+    let face = |key: &str| -> Vec<String> {
+        pdf[key].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    };
+    let (front, back) = (face("presetIds"), face("backPresetIds"));
+    let owned = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let known = PDF_FRONT_DEFAULTS.iter().any(|base| {
+        (0..1u32 << PDF_GROUPS.len()).any(|mask| {
+            let (mut f, mut b) = (owned(base), owned(PDF_BACK_DEFAULT));
+            for (_, group) in PDF_GROUPS.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0) {
+                for id in f.iter_mut().chain(b.iter_mut()).filter(|id| *id == group.replaces) {
+                    *id = group.id.into();
+                }
+            }
+            f == front && b == back
+        })
+    });
+    Some(known)
+}
+
 /// Once per user and group (`policy.json` in Filee Rust's folder): after that, what the user does in upstream's
-/// editor stands.
+/// editor stands. Groups still to come stay out of a PDF donut the user arranged ([`pdf_donut_untouched`]).
 pub fn apply_pdf_groups_once() {
     // With FILEE_DATA_DIR (development, tests) the marker stays beside that data copy, never in the real folder.
     let marker = match std::env::var_os("FILEE_DATA_DIR") {
@@ -93,7 +133,19 @@ pub fn apply_pdf_groups_once() {
         return; // no library yet (seeding failed): try again next start
     }
     let mut marked = false;
+    let pending: Vec<&PdfGroup> = PDF_GROUPS.iter().filter(|g| policy.get(g.policy).is_none_or(Value::is_null)).collect();
+    if !pending.is_empty() && pdf_donut_untouched(&store::profiles()) == Some(false) {
+        for group in &pending {
+            policy[group.policy] = KEPT_USERS_DONUT.into();
+        }
+        marked = true;
+        let names: Vec<_> = pending.iter().map(|g| g.name).collect();
+        info!("PDF donut: the user arranged it; left out {names:?} (for good)");
+    }
     for group in &PDF_GROUPS {
+        if policy.get(group.policy).and_then(Value::as_str) == Some(KEPT_USERS_DONUT) {
+            continue;
+        }
         if policy.get(group.policy).and_then(Value::as_bool) == Some(true) {
             if !group.old_names.is_empty() {
                 store::mutate(DataFile::Presets, group.id, Arc::new(|v: &mut Value| rename_pdf_group(v, group)));
@@ -486,6 +538,41 @@ mod tests {
             group["subPresetIds"],
             serde_json::json!(["merge-pdf", "pdf-split", "tool-pdf-pages", "tool-pdf-add", "compress-pdf"])
         );
+    }
+
+    fn pdf_profile(front: Vec<&str>, back: &[&str]) -> Value {
+        serde_json::json!([{"id": "images", "presetIds": ["to-png"]}, {"id": "pdf", "presetIds": front, "backPresetIds": back}])
+    }
+
+    #[test]
+    fn upstreams_pdf_donut_with_or_without_our_groups_counts_as_untouched() {
+        for base in PDF_FRONT_DEFAULTS {
+            let mut profiles = pdf_profile(base.to_vec(), PDF_BACK_DEFAULT);
+            assert_eq!(pdf_donut_untouched(&profiles), Some(true));
+            for group in &PDF_GROUPS {
+                assert!(swap_in_pdf_profile(&mut profiles, group));
+                assert_eq!(pdf_donut_untouched(&profiles), Some(true), "after {}", group.id);
+            }
+        }
+        // Only the second group (a machine where the first one never went in).
+        let mut profiles = pdf_profile(PDF_FRONT_DEFAULTS[0].to_vec(), PDF_BACK_DEFAULT);
+        assert!(swap_in_pdf_profile(&mut profiles, &PDF_GROUPS[1]));
+        assert_eq!(pdf_donut_untouched(&profiles), Some(true));
+    }
+
+    #[test]
+    fn a_pdf_donut_the_user_arranged_is_not_untouched() {
+        let mut front = PDF_FRONT_DEFAULTS[0].to_vec();
+        front.swap(0, 1); // moved a slice
+        assert_eq!(pdf_donut_untouched(&pdf_profile(front, PDF_BACK_DEFAULT)), Some(false));
+        let mut fewer = PDF_FRONT_DEFAULTS[0].to_vec();
+        fewer.retain(|&id| id != "to-epub"); // took one off
+        assert_eq!(pdf_donut_untouched(&pdf_profile(fewer, PDF_BACK_DEFAULT)), Some(false));
+        let mut back = PDF_BACK_DEFAULT.to_vec();
+        back.push("to-png"); // added one on the back
+        assert_eq!(pdf_donut_untouched(&pdf_profile(PDF_FRONT_DEFAULTS[0].to_vec(), &back)), Some(false));
+        assert_eq!(pdf_donut_untouched(&serde_json::json!([{"id": "images"}])), None, "no PDF profile: nothing to decide");
+        assert_eq!(pdf_donut_untouched(&Value::Null), None);
     }
 
     #[test]

@@ -422,6 +422,46 @@ fn first_run_without_library_files_still_fills_the_donut() {
     assert!(!faces.front.is_empty(), "the donut is empty when the library files are missing");
     assert!(store::find_preset("to-png").is_some());
     assert!(isolated_data_dir().join(DataFile::Profiles.file_name()).exists(), "upstream's defaults were not written");
+    // integration::PDF_FRONT_DEFAULTS / PDF_BACK_DEFAULT are this upstream's PDF donut (update them when upstream
+    // changes it, or the PDF groups would never go onto a new computer's donut).
+    let pdf = store::profiles().as_array().unwrap().iter().find(|p| p["id"] == "pdf").cloned().unwrap();
+    println!("upstream's PDF donut: {} / {}", pdf["presetIds"], pdf["backPresetIds"]);
+    assert_eq!(integration::pdf_donut_untouched(&store::profiles()), Some(true), "upstream's PDF donut changed");
+}
+
+/// A PDF donut the user arranged keeps its slices: the groups still to come are left out for good.
+#[test]
+#[ignore]
+fn a_users_own_pdf_donut_gets_no_new_groups() {
+    let _lock = integration_lock();
+    let (_p, _q) = (Restore::of(DataFile::Presets), Restore::of(DataFile::Profiles));
+    let marker = isolated_data_dir().join("filee-rust-policy.json");
+    let kept_marker = std::fs::read(&marker).ok();
+    let _ = std::fs::remove_file(isolated_data_dir().join(DataFile::Presets.file_name()));
+    let _ = std::fs::remove_file(isolated_data_dir().join(DataFile::Profiles.file_name()));
+    store::load(); // upstream's defaults
+    // The user moves a slice; the Office group already went in on an earlier version.
+    assert!(store::mutate(DataFile::Profiles, "test", Arc::new(|v: &mut Value| {
+        let pdf = v.as_array_mut().unwrap().iter_mut().find(|p| p["id"] == "pdf").unwrap();
+        pdf["presetIds"].as_array_mut().unwrap().swap(0, 1);
+        true
+    })));
+    std::fs::write(&marker, r#"{"pdfOfficeGroup": true}"#).unwrap();
+    let before = store::profiles();
+    integration::apply_pdf_groups_once();
+    store::reload_if_changed();
+    assert_eq!(store::profiles(), before, "the user's PDF donut was changed");
+    let policy: Value = serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+    assert_eq!(policy["pdfOfficeGroup"], true);
+    assert_eq!(policy["pdfToolsGroup"], integration::KEPT_USERS_DONUT);
+    // Later passes leave it alone too.
+    integration::apply_pdf_groups_once();
+    store::reload_if_changed();
+    assert_eq!(store::profiles(), before);
+    match kept_marker {
+        Some(bytes) => std::fs::write(&marker, bytes).unwrap(),
+        None => std::fs::remove_file(&marker).unwrap(),
+    }
 }
 
 /// The PDF donut: merge-pdf gives way to "轉成 Office" (DOCX, XLSX, PPTX), and each member really converts.
