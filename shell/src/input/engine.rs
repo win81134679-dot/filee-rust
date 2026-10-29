@@ -102,6 +102,12 @@ impl Engine {
         self.detector.set_last_position(x, y);
     }
 
+    /// Forgets keys the keyboard no longer reports as down. A key-up the hook never saw (Win+L, a secure desktop)
+    /// would otherwise leave the key in `down_keys` and make its next press look like an auto-repeat.
+    pub fn prune_down_keys(&mut self, still_down: impl Fn(u32) -> bool) {
+        self.down_keys.retain(|vk| still_down(*vk));
+    }
+
     /// When the hold timer is due, if one is running.
     pub fn next_deadline(&self) -> Option<Instant> {
         self.pending_hold.map(|(_, at)| at)
@@ -292,6 +298,22 @@ mod tests {
         assert!(e.handle(down, ms(t0, 530), false, &mut s).is_empty());
         e.handle(Raw::Key { vk: VK_SPACE, down: false, mods: CTRL | ALT }, ms(t0, 600), false, &mut s);
         assert_eq!(e.handle(down, ms(t0, 900), false, &mut s).len(), 1);
+    }
+
+    #[test]
+    fn a_missed_key_up_does_not_swallow_the_next_press_once_pruned() {
+        let (mut e, t0) = engine(json!({}));
+        e.set_last_position(1, 2);
+        let mut s = yes;
+        let down = Raw::Key { vk: VK_SPACE, down: true, mods: CTRL | ALT };
+        assert_eq!(e.handle(down, t0, false, &mut s).len(), 1);
+        // the key-up never arrived: without pruning the next press is taken for an auto-repeat
+        assert!(e.handle(down, ms(t0, 5000), false, &mut s).is_empty());
+        e.prune_down_keys(|_| false);
+        assert_eq!(e.handle(down, ms(t0, 5001), false, &mut s).len(), 1);
+        // a key that is still held stays an auto-repeat
+        e.prune_down_keys(|vk| vk == VK_SPACE);
+        assert!(e.handle(down, ms(t0, 5100), false, &mut s).is_empty());
     }
 
     #[test]

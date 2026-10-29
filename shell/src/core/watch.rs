@@ -124,6 +124,33 @@ impl Rule {
 struct Running {
     signature: String,
     stops: Vec<Arc<AtomicBool>>,
+    /// Set by each watch thread when it has ended, plus those of older generations that had not ended yet when this
+    /// one started. A rebuild waits for all of them so two generations never convert the same file.
+    finished: Vec<Arc<AtomicBool>>,
+}
+
+/// The longest a rebuilt watcher waits for the previous one to leave its batch before it starts anyway.
+const HANDOVER_LIMIT: Duration = Duration::from_secs(600);
+
+/// Sets its flag when dropped, so a watch thread that panics still counts as ended.
+struct SetOnDrop(Arc<AtomicBool>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Waits until every flag is set. False when `stop` is set or `limit` passes first.
+fn wait_until_finished(flags: &[Arc<AtomicBool>], stop: &AtomicBool, limit: Duration, step: Duration) -> bool {
+    let until = Instant::now() + limit;
+    while !flags.iter().all(|f| f.load(Ordering::SeqCst)) {
+        if stop.load(Ordering::SeqCst) || Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(step);
+    }
+    true
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
@@ -140,25 +167,45 @@ pub fn apply(settings: &Value) {
     if running.as_ref().is_some_and(|r| r.signature == signature) || (running.is_none() && rules.is_empty()) {
         return;
     }
+    // The old threads end after the batch they are in; the new ones start only once those have ended.
+    let mut previous: Vec<Arc<AtomicBool>> = Vec::new();
     if let Some(old) = running.take() {
         for stop in old.stops {
             stop.store(true, Ordering::SeqCst);
         }
+        previous = old.finished.into_iter().filter(|f| !f.load(Ordering::SeqCst)).collect();
     }
+    let previous = Arc::new(previous);
     let mut stops = Vec::new();
+    let mut finished: Vec<Arc<AtomicBool>> = previous.iter().cloned().collect();
     for rule in rules {
         let stop = Arc::new(AtomicBool::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
         stops.push(stop.clone());
+        finished.push(ended.clone());
         info!("Watch folder {} -> preset {}", rule.folder.display(), rule.preset_id);
         let name = format!("watch-{}", rule.id);
-        if let Err(e) = std::thread::Builder::new().name(name).spawn(move || watch_loop(rule, stop)) {
+        let (after, flag) = (previous.clone(), ended.clone());
+        if let Err(e) = std::thread::Builder::new().name(name).spawn(move || {
+            let _ended = SetOnDrop(flag);
+            if !after.iter().all(|f| f.load(Ordering::SeqCst)) {
+                if !wait_until_finished(&after, &stop, HANDOVER_LIMIT, Duration::from_millis(100)) && !stop.load(Ordering::SeqCst) {
+                    warn!("Watch folder {}: the previous watcher is still busy; starting anyway", rule.folder.display());
+                }
+            }
+            watch_loop(rule, stop)
+        }) {
             warn!("Could not start a watch thread: {e}");
+            ended.store(true, Ordering::SeqCst);
         }
     }
-    *running = Some(Running { signature, stops });
+    *running = Some(Running { signature, stops, finished });
 }
 
 fn watch_loop(rule: Rule, stop: Arc<AtomicBool>) {
+    if stop.load(Ordering::SeqCst) {
+        return;
+    }
     let mut watcher = Watcher::new(rule.clone());
     let mut announced = false;
     while !stop.load(Ordering::SeqCst) {
@@ -226,10 +273,10 @@ impl Watcher {
         let files = list_files(&self.rule.folder, self.rule.include_subfolders);
         let table = FormatTable::embedded();
         let mut seen: HashSet<String> = HashSet::new();
-        for path in files {
+        for (path, stat) in files {
             let key = util::path_key(&path);
             seen.insert(key.clone());
-            let Some(stat) = stat_of(&path) else { continue };
+            let Some(stat) = stat else { continue };
             if self.known.get(&key) == Some(&stat) {
                 continue;
             }
@@ -313,7 +360,9 @@ impl Watcher {
     }
 }
 
-fn list_files(folder: &Path, recurse: bool) -> Vec<PathBuf> {
+/// The files under `folder` with their size and modification time. The numbers come from the directory listing
+/// itself (`DirEntry::metadata` opens nothing on Windows), so a scan costs no file open per file per second.
+fn list_files(folder: &Path, recurse: bool) -> Vec<(PathBuf, Option<Stat>)> {
     let mut out = Vec::new();
     let mut stack = vec![folder.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -325,7 +374,7 @@ fn list_files(folder: &Path, recurse: bool) -> Vec<PathBuf> {
                     stack.push(entry.path());
                 }
             } else if kind.is_file() {
-                out.push(entry.path());
+                out.push((entry.path(), entry.metadata().ok().and_then(|m| stat_from(&m))));
             }
         }
     }
@@ -333,7 +382,10 @@ fn list_files(folder: &Path, recurse: bool) -> Vec<PathBuf> {
 }
 
 fn stat_of(path: &Path) -> Option<Stat> {
-    let meta = std::fs::metadata(path).ok()?;
+    stat_from(&std::fs::metadata(path).ok()?)
+}
+
+fn stat_from(meta: &std::fs::Metadata) -> Option<Stat> {
     if !meta.is_file() {
         return None;
     }
@@ -574,12 +626,14 @@ fn prepare_temp_data(rule: &Rule, ephemeral: &Value) -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// File name filter (`FileNameFilter`): globs, case-insensitive. /regular expressions/ are not supported here.
+// File name filter (`FileNameFilter`): globs and /regular expressions/, case-insensitive. A regular expression
+// written for .NET that the `regex` crate can't take (look-around, back-references) is skipped, as upstream skips an
+// invalid one.
 
 #[derive(Clone, Debug, Default)]
 pub struct NameFilter {
     globs: Vec<Vec<char>>,
-    unsupported: usize,
+    regexes: Vec<regex::Regex>,
 }
 
 impl NameFilter {
@@ -591,20 +645,24 @@ impl NameFilter {
                 continue;
             }
             if p.chars().count() > 2 && p.starts_with('/') && p.ends_with('/') {
-                f.unsupported += 1;
+                let body = &p[1..p.len() - 1];
+                match regex::RegexBuilder::new(body).case_insensitive(true).size_limit(1 << 20).build() {
+                    Ok(r) => f.regexes.push(r),
+                    Err(e) => warn!("Watch-folder pattern {p} is left out: {e}"),
+                }
                 continue;
             }
             f.globs.push(p.to_lowercase().chars().collect());
-        }
-        if f.unsupported > 0 {
-            warn!("{} watch-folder pattern(s) are regular expressions, which Filee Rust does not evaluate", f.unsupported);
         }
         f
     }
 
     /// No usable pattern means every file.
     pub fn matches(&self, name: &str) -> bool {
-        if self.globs.is_empty() {
+        if self.globs.is_empty() && self.regexes.is_empty() {
+            return true;
+        }
+        if self.regexes.iter().any(|r| r.is_match(name)) {
             return true;
         }
         let name: Vec<char> = name.to_lowercase().chars().collect();
@@ -767,6 +825,43 @@ mod tests {
     }
 
     #[test]
+    fn a_rebuilt_watcher_waits_for_the_old_one_to_end() {
+        let flags = vec![Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(true))];
+        let stop = AtomicBool::new(false);
+        // still busy: gives up at the limit
+        assert!(!wait_until_finished(&flags, &stop, Duration::from_millis(60), Duration::from_millis(10)));
+        // stopped while waiting: gives up at once
+        let stopped = AtomicBool::new(true);
+        let started = Instant::now();
+        assert!(!wait_until_finished(&flags, &stopped, Duration::from_secs(30), Duration::from_millis(10)));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // the old watcher ends (a panic counts too, via the drop guard)
+        let old = flags[0].clone();
+        let t = std::thread::spawn(move || {
+            let _guard = SetOnDrop(old);
+            std::thread::sleep(Duration::from_millis(80));
+        });
+        assert!(wait_until_finished(&flags, &stop, Duration::from_secs(30), Duration::from_millis(10)));
+        t.join().unwrap();
+        assert!(wait_until_finished(&[], &stop, Duration::ZERO, Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn the_scan_listing_carries_sizes_and_times_without_opening_files() {
+        let dir = scratch("watch-list-files");
+        std::fs::write(dir.join("a.png"), b"12345").unwrap();
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("b.png"), b"1").unwrap();
+        let top = list_files(&dir, false);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].1.map(|s| s.len), Some(5));
+        assert_eq!(top[0].1, stat_of(&top[0].0));
+        let all = list_files(&dir, true);
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().all(|(_, stat)| stat.is_some()));
+    }
+
+    #[test]
     fn rules_are_read_like_upstream() {
         let r = Rule::from_value(&rule_json()).unwrap();
         assert_eq!(r.folder, PathBuf::from(r"C:\Inbox"));
@@ -794,8 +889,14 @@ mod tests {
         assert!(!f.matches("scan_001"));
         assert!(!f.matches("photo.png"));
         assert!(NameFilter::of(&[]).matches("anything"));
-        // Only regular expressions: nothing usable, so everything passes (upstream's "all invalid").
-        assert!(NameFilter::of(&["/^IMG_\\d+/".into()]).matches("whatever.png"));
+        // A regular expression between slashes, as upstream: unanchored, case ignored.
+        let re = NameFilter::of(&["/^IMG_\\d+/".into()]);
+        assert!(re.matches("img_0042.heic"));
+        assert!(!re.matches("whatever.png"));
+        let mixed = NameFilter::of(&["/^IMG_\\d+/".into(), "*.pdf".into()]);
+        assert!(mixed.matches("report.PDF") && mixed.matches("IMG_1.png") && !mixed.matches("a.png"));
+        // Only patterns that can't be used: nothing usable, so everything passes (upstream's "all invalid").
+        assert!(NameFilter::of(&["/(?<=a)b/".into()]).matches("whatever.png"));
         assert!(glob_match(&"a*b*c".chars().collect::<Vec<_>>(), &"aXXbYYc".chars().collect::<Vec<_>>()));
         assert!(!glob_match(&"a*b*c".chars().collect::<Vec<_>>(), &"aXXbYY".chars().collect::<Vec<_>>()));
         assert!(glob_match(&"*".chars().collect::<Vec<_>>(), &[]));

@@ -34,6 +34,11 @@ pub fn init() {
     window::init();
 }
 
+/// At exit (UI thread), before COM goes away.
+pub fn shutdown() {
+    window::shutdown();
+}
+
 pub fn set_style(palette: &Palette, donut_settings: &serde_json::Value) {
     window::set_style(palette, donut_settings);
 }

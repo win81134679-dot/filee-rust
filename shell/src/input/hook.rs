@@ -108,15 +108,20 @@ fn send(raw: Raw) {
 
 // ---- hook callbacks (the OS calls these on the hook thread; keep them tiny) ----
 
-/// Rebuilds the modifier state from the keyboard; called on a mouse press so a missed key-up can't stick.
+/// Rebuilds the modifier state from the keyboard; called on a mouse press and on every non-modifier key-down so a
+/// missed key-up (Win+L, a secure desktop, an elevated window) can't leave a modifier stuck.
 fn resync_modifiers() {
     let mut bits = 0u16;
     for (vk, bit) in MOD_KEYS {
-        if unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 != 0 {
+        if key_is_down(vk) {
             bits |= bit;
         }
     }
     MOD_BITS.store(bits, Ordering::Relaxed);
+}
+
+fn key_is_down(vk: u32) -> bool {
+    (unsafe { GetAsyncKeyState(vk as i32) }) as u16 & 0x8000 != 0
 }
 
 unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -192,6 +197,9 @@ fn on_key(message: u32, info: &KBDLLHOOKSTRUCT) {
             MOD_BITS.fetch_and(!bit, Ordering::Relaxed);
         }
     }
+    if down && mod_bit(vk).is_none() {
+        resync_modifiers();
+    }
     let mods = mods_from_bits(MOD_BITS.load(Ordering::Relaxed));
     send(Raw::Key { vk, down, mods });
 }
@@ -256,17 +264,36 @@ fn worker_thread(rx: Receiver<Msg>) {
                 Err(_) => break,
             },
         };
-        let events = match msg {
-            None => engine.tick(Instant::now()),
-            Some(Msg::Stop) => break,
+        // A panic in one message (a Win32 lookup, the engine) must not end the thread: that would silently kill every
+        // gesture until restart. Log it and carry on with the next message.
+        let processed = catch_unwind(AssertUnwindSafe(|| match msg {
+            None => Some(engine.tick(Instant::now())),
+            Some(Msg::Stop) => None,
             Some(Msg::Config) => {
                 apply(&mut engine, &mut checker);
-                Vec::new()
+                Some(Vec::new())
             }
             Some(Msg::Raw(raw)) => {
+                if let Raw::Key { down: true, .. } = raw {
+                    // a key-up we never saw would make this press look like an auto-repeat
+                    engine.prune_down_keys(key_is_down);
+                }
                 let watch = WATCH_FLIP.load(Ordering::Relaxed);
                 let mut scope = |t: &super::gesture::Trigger, x: i32, y: i32| checker.in_scope(t, x, y);
-                engine.handle(raw, Instant::now(), watch, &mut scope)
+                Some(engine.handle(raw, Instant::now(), watch, &mut scope))
+            }
+        }));
+        let events = match processed {
+            Ok(Some(events)) => events,
+            Ok(None) => break,
+            Err(payload) => {
+                let what = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                crate::warn!("The input worker recovered from a panic: {what}");
+                Vec::new()
             }
         };
         for event in events {

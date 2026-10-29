@@ -50,6 +50,8 @@ struct State {
     presets: Value,
     profiles: Value,
     stamps: [Stamp; 3],
+    /// What the previous poll saw, loaded or not (see [`settled_change`]).
+    seen: [Stamp; 3],
     loaded: bool,
 }
 
@@ -58,6 +60,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     presets: Value::Null,
     profiles: Value::Null,
     stamps: [None, None, None],
+    seen: [None, None, None],
     loaded: false,
 });
 /// Serializes read-modify-write cycles.
@@ -69,8 +72,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 fn stamp_of(file: DataFile) -> Stamp {
-    let meta = std::fs::metadata(file.path()).ok()?;
-    Some((meta.len(), meta.modified().ok()?))
+    util::file_stamp(&file.path())
 }
 
 fn index(file: DataFile) -> usize {
@@ -151,7 +153,15 @@ fn reload_file(st: &mut State, file: DataFile) {
         DataFile::History => return,
     };
     match value {
-        Some(v) => *slot = v,
+        Some(mut v) => {
+            // Edits still waiting for the hosted Filee stay visible: its save would otherwise undo a tray pause.
+            for (f, _, edit) in lock(&PENDING).iter() {
+                if *f == file {
+                    edit(&mut v);
+                }
+            }
+            *slot = v
+        }
         // Unreadable or missing: keep what we had; upstream would use its built-in defaults, so an empty value is
         // the honest "nothing" for a first read.
         None if slot.is_null() => *slot = empty_for(file),
@@ -163,7 +173,7 @@ fn reload_file(st: &mut State, file: DataFile) {
 /// True when a data file changed on disk since the last load (and it was reloaded). Also replays queued writes once
 /// the hosted Filee has ended. Called every 1.5 s.
 pub fn reload_if_changed() -> bool {
-    flush_pending();
+    let flushed = flush_pending();
     let mut st = lock(&STATE);
     if !st.loaded {
         for file in [DataFile::Settings, DataFile::Presets, DataFile::Profiles] {
@@ -174,12 +184,23 @@ pub fn reload_if_changed() -> bool {
     }
     let mut changed = false;
     for file in [DataFile::Settings, DataFile::Presets, DataFile::Profiles] {
-        if stamp_of(file) != st.stamps[index(file)] {
+        let i = index(file);
+        let now = stamp_of(file);
+        let settled = settled_change(now, st.stamps[i], st.seen[i]);
+        st.seen[i] = now;
+        if settled {
             reload_file(&mut st, file);
             changed = true;
         }
     }
-    changed
+    changed || flushed
+}
+
+/// Reload only once a change has stopped changing (the same stamp on two polls in a row). Upstream saves several
+/// times in a row (a theme switch does), and replacing a file fails while we have it open: reading in the middle of
+/// such a burst made the settings window crash with "access denied".
+fn settled_change(now: Stamp, loaded: Stamp, seen: Stamp) -> bool {
+    now != loaded && now == seen
 }
 
 pub fn settings() -> Value {
@@ -253,14 +274,16 @@ pub fn mutate(file: DataFile, label: &'static str, edit: Edit) -> bool {
     apply_now(file, label, &edit)
 }
 
-fn flush_pending() {
+/// True when queued edits were written (the caller re-applies the settings: the files are newer than what was shown).
+fn flush_pending() -> bool {
     if lock(&PENDING).is_empty() || hosted::is_running() {
-        return;
+        return false;
     }
     let batch: Vec<_> = std::mem::take(&mut *lock(&PENDING));
     for (file, label, edit) in batch {
         apply_now(file, label, &edit);
     }
+    true
 }
 
 /// Number of edits waiting for the hosted Filee to end.
@@ -400,6 +423,21 @@ mod tests {
     #[test]
     fn data_files_resolve_under_the_data_dir() {
         assert!(DataFile::Settings.path().ends_with("settings.json"));
+    }
+
+    #[test]
+    fn a_changed_file_is_read_only_after_it_stopped_changing() {
+        let t = |s: u64| Some((s, SystemTime::UNIX_EPOCH));
+        // Unchanged: nothing to do.
+        assert!(!settled_change(t(1), t(1), t(1)));
+        // Just changed (first poll that sees it): wait, upstream may still be saving.
+        assert!(!settled_change(t(2), t(1), t(1)));
+        // Same new stamp on the next poll: read it.
+        assert!(settled_change(t(2), t(1), t(2)));
+        // Still changing: keep waiting.
+        assert!(!settled_change(t(3), t(1), t(2)));
+        // Deleted after being loaded: settled once it stays gone.
+        assert!(settled_change(None, t(1), None));
         assert!(DataFile::History.path().ends_with("history.json"));
     }
 
@@ -410,7 +448,7 @@ mod tests {
         let v = s(r#"{"a":"一二三","list":[1,2,3],"f":0.42}"#);
         util::atomic_write(&path, util::to_upstream_json(&v, false).as_bytes()).unwrap();
         assert_eq!(util::read_json_file(&path).unwrap(), v);
-        assert!(!dir.join("x.json.tmp").exists());
+        assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains(".tmp")));
         // Bytes on disk are ASCII only (non-ASCII escaped) and have no BOM.
         let bytes = std::fs::read(&path).unwrap();
         assert!(bytes.iter().all(|b| *b < 0x80));

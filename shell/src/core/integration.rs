@@ -58,8 +58,18 @@ pub fn apply_pdf_office_once() {
     if store::presets().as_array().is_none_or(|a| a.is_empty()) {
         return; // no library yet (seeding failed): try again next start
     }
-    store::mutate(DataFile::Presets, "pdf-office-group", Arc::new(add_pdf_office_group));
-    store::mutate(DataFile::Profiles, "pdf-office-swap", Arc::new(swap_pdf_merge));
+    let group_written = store::mutate(DataFile::Presets, "pdf-office-group", Arc::new(add_pdf_office_group));
+    // No group to copy the fields from (an edited library): leave merge-pdf alone rather than point at nothing.
+    let group_exists = store::presets().as_array().is_some_and(|a| a.iter().any(|p| p["id"] == PDF_OFFICE_GROUP));
+    if !group_exists {
+        return;
+    }
+    let swap_written = store::mutate(DataFile::Profiles, "pdf-office-swap", Arc::new(swap_pdf_merge));
+    // Queued (the settings window is open) or refused: not done yet. The next pass finds the group there and
+    // nothing left to change, and only then is it marked done.
+    if !(group_written && swap_written) {
+        return;
+    }
     policy["pdfOfficeGroup"] = Value::Bool(true);
     match util::atomic_write(&marker, util::to_upstream_json(&policy, false).as_bytes()) {
         Ok(()) => info!("PDF donut: merge-pdf replaced by the Office group (once)"),

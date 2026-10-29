@@ -39,7 +39,10 @@ const ID_ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTVWXYZ";
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static CHECKED_THIS_RUN: AtomicBool = AtomicBool::new(false);
 /// The user asked (tray): install as soon as nothing is converting, without waiting for idle time or mains power.
+/// Only for the installer that check found; cleared when that check ends without one and when Setup starts.
 static FORCE: AtomicBool = AtomicBool::new(false);
+/// Setup ran this many times for the same waiting installer and Filee Rust came back at the old version: stop.
+const MAX_INSTALL_ATTEMPTS: u32 = 3;
 
 // ------------------------------------------------------------------------------------------------- pure parts
 
@@ -249,6 +252,10 @@ pub struct State {
     pub last_check: u64,
     /// A verified installer waiting to be run: (version, path).
     pub ready: Option<(String, PathBuf)>,
+    /// SHA-256 (hex) of that installer when it was verified: checked again right before it runs.
+    pub sha256: Option<String>,
+    /// How many times Setup was started for it.
+    pub attempts: u32,
 }
 
 impl State {
@@ -256,13 +263,27 @@ impl State {
         let ready = v.get("ready").and_then(|r| {
             Some((r.get("version")?.as_str()?.to_string(), PathBuf::from(r.get("path")?.as_str()?)))
         });
-        State { last_check: v.get("lastCheck").and_then(Value::as_u64).unwrap_or(0), ready }
+        let sha256 = v.pointer("/ready/sha256").and_then(Value::as_str).map(str::to_string);
+        let attempts = v.pointer("/ready/attempts").and_then(Value::as_u64).unwrap_or(0) as u32;
+        State { last_check: v.get("lastCheck").and_then(Value::as_u64).unwrap_or(0), ready, sha256, attempts }
     }
 
     pub fn to_json(&self) -> Value {
-        let ready = self.ready.as_ref().map(|(v, p)| json!({ "version": v, "path": p.to_string_lossy() }));
+        let ready = self.ready.as_ref().map(|(v, p)| {
+            json!({ "version": v, "path": p.to_string_lossy(), "sha256": self.sha256, "attempts": self.attempts })
+        });
         json!({ "lastCheck": self.last_check, "ready": ready })
     }
+
+    /// The waiting installer, unless Setup already ran for it [`MAX_INSTALL_ATTEMPTS`] times without effect.
+    pub fn installable(&self) -> Option<(String, PathBuf)> {
+        self.ready.clone().filter(|_| self.attempts < MAX_INSTALL_ATTEMPTS)
+    }
+}
+
+fn sha256_hex(path: &Path) -> Option<String> {
+    let data = std::fs::read(path).ok()?;
+    Some(util::sha256(&data).iter().map(|b| format!("{b:02x}")).collect())
 }
 
 fn load() -> State {
@@ -294,6 +315,8 @@ fn text(key: &str) -> &'static str {
         ("failed", false) => "Update check failed: ",
         ("dev", true) => "這是開發版，不會自動更新",
         ("dev", false) => "This is a development build; it does not update itself",
+        ("given-up", true) => "安裝新版一直沒成功，已停止重試：",
+        ("given-up", false) => "Installing the new version kept failing; no more tries: ",
         ("all-users", true) => "裝在所有使用者（Program Files）時不能自動更新，請手動安裝新版",
         ("all-users", false) => "Installed for all users (Program Files): install new versions by hand",
         (_, true) => "",
@@ -317,8 +340,12 @@ pub fn startup() {
         if parse_version(&v) <= parse_version(&current) {
             let _ = std::fs::remove_file(&path);
             state.ready = None;
+            state.sha256 = None;
+            state.attempts = 0;
             save(&state);
             info!("Updated to {current}");
+        } else if state.attempts >= MAX_INSTALL_ATTEMPTS {
+            warn!("Self-update: Setup for {v} ran {} times and {current} is still here; not trying again", state.attempts);
         }
     }
 }
@@ -330,7 +357,10 @@ pub fn tick(busy: bool) {
         return;
     }
     let state = load();
-    if let Some((version, path)) = state.ready.clone() {
+    if state.ready.is_some() && state.installable().is_none() {
+        return; // given up on this one; the next newer release replaces it
+    }
+    if let Some((version, path)) = state.installable() {
         let force = FORCE.load(Ordering::SeqCst);
         if path.exists() && (force || auto_enabled()) && may_install(busy, force, idle_ms(), on_battery()) {
             install(&version, &path, force);
@@ -351,10 +381,16 @@ pub fn check_now() {
         return notify(true, "all-users", "");
     }
     FORCE.store(true, Ordering::SeqCst);
-    if let Some((version, path)) = load().ready.filter(|(_, p)| p.exists()) {
+    let state = load();
+    if let Some((version, path)) = state.installable().filter(|(_, p)| p.exists()) {
         return ready(version, path, true);
     }
+    if let Some((version, _)) = state.ready.filter(|_| state.attempts >= MAX_INSTALL_ATTEMPTS) {
+        FORCE.store(false, Ordering::SeqCst);
+        return notify(true, "given-up", &version);
+    }
     notify(true, "checking", "");
+    // An automatic check already running reports to the tray too: it reads FORCE when it ends.
     check(true);
 }
 
@@ -406,8 +442,11 @@ fn check(manual: bool) {
         let log_path = crate::paths::lite_dir().join("logs").join("self-update.log");
         let mut log = Vec::new();
         let mut outcome = None;
+        // The tray may ask while an automatic check runs: from then on this one reports like a manual one.
+        let manual = || manual || FORCE.load(Ordering::SeqCst);
         if let Some(out) = stdout {
             for line in BufReader::new(out).lines().map_while(Result::ok) {
+                let manual = manual();
                 match parse_line(&line) {
                     Line::Progress(..) => {}
                     Line::Available(v) => {
@@ -419,7 +458,8 @@ fn check(manual: bool) {
                         log.push(line);
                     }
                     Line::Current(v) => {
-                        notify(manual, "current", &format!("（{v}）"));
+                        let zh = crate::ui::i18n::current().starts_with("zh");
+                        notify(manual, "current", &if zh { format!("（{v}）") } else { format!(" ({v})") });
                         log.push(line);
                     }
                     Line::Failed(why) => {
@@ -433,17 +473,23 @@ fn check(manual: bool) {
         let ok = child.wait().is_ok_and(|s| s.success());
         let _ = std::fs::write(&log_path, log.join("\r\n") + "\r\n");
         RUNNING.store(false, Ordering::SeqCst);
+        let manual = manual();
         match outcome {
-            Some((v, p)) if ok => ready(v, p, manual),
+            Some((v, p)) if ok => return ready(v, p, manual),
             _ if !ok => warn!("Self-update check failed (see {}); trying again tomorrow", log_path.display()),
             _ => {}
         }
+        FORCE.store(false, Ordering::SeqCst);
     });
 }
 
 fn ready(version: String, path: PathBuf, manual: bool) {
     info!("Self-update: {version} is downloaded and verified");
     let mut state = load();
+    if state.ready.as_ref().map(|(v, _)| v) != Some(&version) {
+        state.attempts = 0;
+    }
+    state.sha256 = sha256_hex(&path);
     state.ready = Some((version.clone(), path));
     save(&state);
     if manual {
@@ -454,7 +500,9 @@ fn ready(version: String, path: PathBuf, manual: bool) {
 /// The tray asked and the installer is there: run it now unless a conversion is running (then the timer does).
 pub fn install_requested(version: &str, busy: bool) {
     match load().ready {
-        Some((_, path)) if path.exists() && !busy && !for_all_users() => install(version, &path, true),
+        Some((_, path)) if path.exists() && !busy && !for_all_users() && load().installable().is_some() => {
+            install(version, &path, true)
+        }
         Some(_) => notify(true, "after-jobs", version),
         None => {}
     }
@@ -462,7 +510,20 @@ pub fn install_requested(version: &str, busy: bool) {
 
 fn install(version: &str, path: &Path, manual: bool) {
     let log = crate::paths::lite_dir().join("logs").join("self-update-setup.log");
-    info!("Self-update: installing {version} ({})", path.display());
+    FORCE.store(false, Ordering::SeqCst);
+    let mut state = load();
+    // self-update.json is the user's to write: run only the bytes that were verified when they came down.
+    if state.sha256.is_none() || sha256_hex(path) != state.sha256 {
+        warn!("Self-update: {} changed since it was verified; downloading it again", path.display());
+        let _ = std::fs::remove_file(path);
+        state.ready = None;
+        state.sha256 = None;
+        save(&state);
+        return;
+    }
+    state.attempts += 1;
+    save(&state);
+    info!("Self-update: installing {version} ({}), attempt {}", path.display(), state.attempts);
     notify(manual, "installing", version);
     // Setup refuses to run while the single-instance lock is held (its AppMutex): let go of it first.
     crate::single::release();
@@ -570,8 +631,26 @@ mod tests {
 
     #[test]
     fn state_round_trip() {
-        let s = State { last_check: 5, ready: Some(("2.2.0-rust.6".into(), PathBuf::from(r"C:\u\x.exe"))) };
+        let s = State {
+            last_check: 5,
+            ready: Some(("2.2.0-rust.6".into(), PathBuf::from(r"C:\u\x.exe"))),
+            sha256: Some("ab".into()),
+            attempts: 2,
+        };
         assert_eq!(State::from_json(&s.to_json()), s);
         assert_eq!(State::from_json(&json!({})), State::default());
+        // A state file from before attempts/sha256 existed still reads.
+        let old = State::from_json(&json!({"lastCheck": 1, "ready": {"version": "2.2.0-rust.6", "path": "x"}}));
+        assert_eq!((old.attempts, old.sha256), (0, None));
+    }
+
+    #[test]
+    fn setup_is_not_rerun_forever_for_the_same_installer() {
+        let mut s = State { ready: Some(("2.2.0-rust.6".into(), PathBuf::from("x"))), ..State::default() };
+        for _ in 0..MAX_INSTALL_ATTEMPTS {
+            assert!(s.installable().is_some());
+            s.attempts += 1;
+        }
+        assert_eq!(s.installable(), None);
     }
 }

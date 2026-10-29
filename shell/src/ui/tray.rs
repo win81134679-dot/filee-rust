@@ -95,9 +95,12 @@ pub fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> b
                 true
             }
             CMD_PAUSE => {
-                let paused = !PAUSED.load(Ordering::SeqCst);
-                crate::core::store::set_paused(paused);
+                crate::core::store::set_paused(!PAUSED.load(Ordering::SeqCst));
+                // What the store holds now, not what was asked: a refused write (another schema) must not show
+                // "paused" while gestures still work.
+                let paused = crate::core::store::settings().get("paused").and_then(|v| v.as_bool()).unwrap_or(false);
                 set_paused(paused);
+                events::post(AppEvent::DataChanged);
                 true
             }
             CMD_QUIT => {
@@ -117,6 +120,9 @@ pub fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> b
                 if copy_text(&card) {
                     let done = if zh { "已複製，貼給發佈者即可：" } else { "Copied; paste it to the publisher: " };
                     balloon("Filee Rust", &format!("{done}\n{card}"));
+                } else {
+                    let failed = if zh { "無法複製（剪貼簿被占用），識別碼是：" } else { "Could not copy (clipboard busy); the id is: " };
+                    balloon("Filee Rust", &format!("{failed}\n{card}"));
                 }
                 true
             }
@@ -207,7 +213,7 @@ pub fn balloon(title: &str, text: &str) {
 
 /// Puts `text` on the clipboard (CF_UNICODETEXT).
 fn copy_text(text: &str) -> bool {
-    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Foundation::{GlobalFree, HANDLE};
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     const CF_UNICODETEXT: u32 = 13;
@@ -216,17 +222,32 @@ fn copy_text(text: &str) -> bool {
         let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2) else { return false };
         let ptr = GlobalLock(mem) as *mut u16;
         if ptr.is_null() {
+            let _ = GlobalFree(Some(mem));
             return false;
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         let _ = GlobalUnlock(mem);
         let hwnd = HWND(MAIN.load(Ordering::SeqCst) as *mut _);
-        if OpenClipboard(Some(hwnd)).is_err() {
+        // Another program may hold the clipboard for a moment.
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(Some(hwnd)).is_ok() {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+        if !opened {
+            let _ = GlobalFree(Some(mem));
             return false;
         }
         let _ = EmptyClipboard();
+        // On success the clipboard owns the memory; otherwise it is still ours to free.
         let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(mem.0))).is_ok();
         let _ = CloseClipboard();
+        if !ok {
+            let _ = GlobalFree(Some(mem));
+        }
         ok
     }
 }

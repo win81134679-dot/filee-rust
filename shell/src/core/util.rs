@@ -132,17 +132,40 @@ pub fn file_uses_crlf(path: &Path, default: bool) -> bool {
     }
 }
 
-/// `<path>.tmp` then rename over `path` (replaces; same folder, as upstream).
+/// Size and last-write time without opening the file. `std::fs::metadata` opens a handle, and while any handle is
+/// open upstream's save (write .tmp, then replace) fails with "access denied"; the directory listing doesn't.
+pub fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
+    use windows::Win32::Storage::FileSystem::{FindClose, FindFirstFileW, WIN32_FIND_DATAW};
+    let name = wide(&path.to_string_lossy());
+    let mut data = WIN32_FIND_DATAW::default();
+    let handle = unsafe { FindFirstFileW(windows::core::PCWSTR(name.as_ptr()), &mut data) }.ok()?;
+    let _ = unsafe { FindClose(handle) };
+    let len = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
+    let ticks = ((data.ftLastWriteTime.dwHighDateTime as u64) << 32) | data.ftLastWriteTime.dwLowDateTime as u64;
+    let since_1970 = ticks.checked_sub(FILETIME_UNIX_EPOCH)?;
+    Some((len, UNIX_EPOCH + std::time::Duration::from_nanos(since_1970 * 100)))
+}
+
+/// `<path>.tmp-<pid>` then rename over `path` (replaces; same folder). Upstream uses `<path>.tmp` itself, so our own
+/// name keeps the two from truncating each other's half-written file. Replacing fails with "access denied" while
+/// another process has `path` open (upstream reading it, an antivirus scan), so that is waited out for up to 2 s.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp = path.as_os_str().to_os_string();
-    tmp.push(".tmp");
+    tmp.push(format!(".tmp-{}", std::process::id()));
     let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, bytes)?;
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e)
+    let mut attempt = 1;
+    loop {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < 40 && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
         }
     }
 }
@@ -264,6 +287,39 @@ pub fn wide(s: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_write_waits_while_another_handle_has_the_file_open() {
+        let dir = std::env::temp_dir().join(format!("filee-rust-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, b"old").unwrap();
+        // As upstream's File.OpenRead: FILE_SHARE_READ only. (Rust's own handles allow delete, and its rename uses
+        // POSIX semantics, so those never block.)
+        use std::os::windows::fs::OpenOptionsExt;
+        let holder = std::fs::OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(holder);
+        });
+        atomic_write(&path, b"new").unwrap();
+        release.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file left");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn file_stamp_matches_metadata_and_does_not_block_a_replace() {
+        let dir = std::env::temp_dir().join(format!("filee-rust-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, b"12345").unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_eq!(file_stamp(&path), Some((5, meta.modified().unwrap())));
+        assert_eq!(file_stamp(&dir.join("missing.json")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn sha256_known_vectors() {

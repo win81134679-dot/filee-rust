@@ -113,6 +113,32 @@ pub fn init() {
     }
 }
 
+/// At exit, before OLE and COM are uninitialised: the drop target is revoked and the Direct2D objects released here
+/// rather than by thread-local destructors while the process is being torn down.
+pub fn shutdown() {
+    let _ = DONUT.try_with(|d| {
+        if let Ok(mut d) = d.try_borrow_mut() {
+            if !d.hwnd.is_invalid() {
+                unsafe {
+                    let _ = windows::Win32::System::Ole::RevokeDragDrop(d.hwnd);
+                    let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(d.hwnd);
+                }
+                d.hwnd = HWND::default();
+            }
+            d.renderer = None;
+            d.surface = None;
+        }
+    });
+}
+
+/// `EndDraw` reports `D2DERR_RECREATE_TARGET` when the device was lost; the renderer must then be rebuilt.
+fn needs_new_renderer(hr: windows::core::HRESULT) -> bool {
+    hr == D2DERR_RECREATE_TARGET
+}
+
+/// `D2DERR_RECREATE_TARGET` (0x8899000C); the windows crate does not export the constant.
+const D2DERR_RECREATE_TARGET: windows::core::HRESULT = windows::core::HRESULT(0x8899000Cu32 as i32);
+
 pub fn set_style(palette: &Palette, donut_settings: &serde_json::Value) {
     with(|d| {
         d.palette = palette.clone();
@@ -478,10 +504,17 @@ impl Donut {
                 }
             }
         }
+        let mut lost_target = false;
         if let Some(r) = &self.renderer {
             if let Err(e) = r.draw(surface.dc, surface.width, surface.height, self.scale, &self.menu, &self.palette) {
                 crate::warn!("donut: draw failed: {e}");
+                lost_target = needs_new_renderer(e.code());
             }
+        }
+        if lost_target {
+            // The render target's device is gone (display change, driver reset): drawing keeps failing until every
+            // Direct2D resource is rebuilt, which the next frame does.
+            self.renderer = None;
         }
         // Even when drawing failed or has nothing to show, keep the area that must catch drags and clicks.
         surface.apply_backing(&self.menu.backing(), self.menu.center(), self.scale as f64);
@@ -809,6 +842,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_lost_render_target_drops_the_renderer() {
+        assert!(needs_new_renderer(D2DERR_RECREATE_TARGET));
+        assert!(!needs_new_renderer(windows::core::HRESULT(0)));
+        assert!(!needs_new_renderer(windows::Win32::Foundation::E_FAIL));
+    }
 
     #[test]
     fn key_names_match_the_hook_names() {

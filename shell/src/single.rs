@@ -60,7 +60,10 @@ pub fn forward(args: &[String]) -> bool {
         data.push(0);
     }
     unsafe {
-        for _ in 0..20 {
+        // The first instance makes its window only after reading the data files, which on a new computer waits for
+        // upstream to write its default library (up to a minute): wait that long, or an Explorer "convert" or a
+        // second start is lost.
+        for _ in 0..500 {
             if let Ok(hwnd) = FindWindowW(crate::MAIN_CLASS, PCWSTR::null()) {
                 let cds = COPYDATASTRUCT {
                     dwData: MAGIC,

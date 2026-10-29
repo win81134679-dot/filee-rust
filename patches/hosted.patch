@@ -694,6 +694,38 @@ index 93a25df..8a6892f 100644
      private readonly Mutex _mutex;
      private readonly string _name;
      private readonly CancellationTokenSource _cts = new();
+diff --git a/src/Filee.Core/Settings/UserDataStore.cs b/src/Filee.Core/Settings/UserDataStore.cs
+index b788b69..a7f80b8 100644
+--- a/src/Filee.Core/Settings/UserDataStore.cs
++++ b/src/Filee.Core/Settings/UserDataStore.cs
+@@ -331,7 +331,26 @@ private void Write<T>(string path, T value, JsonTypeInfo<T> type)
+             var temp = path + ".tmp";
+             using (var stream = File.Create(temp))
+                 JsonSerializer.Serialize(stream, value, type);
+-            File.Move(temp, path, overwrite: true);
++            // Replacing a file fails with "access denied" while any other process has it open (Filee Rust re-reading
++            // it after a change, an antivirus scan). Wait that out; if it never ends, keep the change in memory (the
++            // next save writes it) instead of letting the exception end the app.
++            for (int attempt = 1; ; attempt++)
++            {
++                try
++                {
++                    File.Move(temp, path, overwrite: true);
++                    return;
++                }
++                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
++                {
++                    if (attempt >= 40)
++                    {
++                        _log.LogWarning(ex, "Could not replace {Path}; the change stays in memory until the next save", path);
++                        return;
++                    }
++                    Thread.Sleep(50);
++                }
++            }
+         }
+     }
+ }
 diff --git a/src/Filee.Engines/EngineRegistry.cs b/src/Filee.Engines/EngineRegistry.cs
 index 5212f3c..da254dd 100644
 --- a/src/Filee.Engines/EngineRegistry.cs

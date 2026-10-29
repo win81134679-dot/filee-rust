@@ -52,7 +52,7 @@ pub fn is_desktop_class(class: &str) -> bool {
 pub fn is_browser(process: Option<&str>) -> bool {
     let Some(p) = process else { return false };
     let p = p.trim();
-    let p = if p.len() >= 4 && p[p.len() - 4..].eq_ignore_ascii_case(".exe") { &p[..p.len() - 4] } else { p };
+    let p = strip_exe_suffix(p);
     BROWSER_PROCESSES.iter().any(|b| b.eq_ignore_ascii_case(p))
 }
 
@@ -66,23 +66,29 @@ pub fn normalize_excluded(list: &[String]) -> HashSet<String> {
 }
 
 fn strip_exe_everywhere(s: &str) -> String {
-    let lower = s.to_lowercase();
-    // `to_lowercase` can change byte lengths for exotic characters; fall back to a plain lowercase replace then.
-    if lower.len() != s.len() {
-        return lower.replace(".exe", "");
-    }
-    let mut out = String::with_capacity(s.len());
+    // ".exe" is ASCII, and ASCII bytes never occur inside a multi-byte UTF-8 sequence, so a byte scan only ever cuts
+    // at character boundaries and the rest stays valid UTF-8.
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    while i < s.len() {
-        if lower[i..].starts_with(".exe") {
+    while i < bytes.len() {
+        if bytes.len() - i >= 4 && bytes[i..i + 4].eq_ignore_ascii_case(b".exe") {
             i += 4;
         } else {
-            let ch = s[i..].chars().next().unwrap_or(' ');
-            out.push(ch);
-            i += ch.len_utf8();
+            out.push(bytes[i]);
+            i += 1;
         }
     }
-    out
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+/// `s` without a trailing ".exe" (any case); safe for non-ASCII names, where byte offset `len - 4` may fall inside a
+/// character.
+fn strip_exe_suffix(s: &str) -> &str {
+    match s.len().checked_sub(4).and_then(|at| s.get(at..).map(|tail| (at, tail))) {
+        Some((at, tail)) if tail.eq_ignore_ascii_case(".exe") => &s[..at],
+        _ => s,
+    }
 }
 
 /// What the window the gesture is judged by looks like.
@@ -177,7 +183,7 @@ pub fn process_name_of(hwnd: HWND) -> Option<String> {
         }
         let path = String::from_utf16_lossy(&buf[..len as usize]);
         let file = path.rsplit(['\\', '/']).next().unwrap_or(&path);
-        let stem = if file.len() >= 4 && file[file.len() - 4..].eq_ignore_ascii_case(".exe") { &file[..file.len() - 4] } else { file };
+        let stem = strip_exe_suffix(file);
         (!stem.is_empty()).then(|| stem.to_string())
     }
 }
@@ -327,6 +333,23 @@ mod tests {
     fn a_process_that_could_not_be_read_is_not_excluded_but_class_still_decides() {
         let w = WindowFacts { class: Some("CabinetWClass".into()), process: None, fm_class: Some("CabinetWClass".into()) };
         assert!(allows(Kind::Hold, Scope::FileManager, &w, &OWN, &normalize_excluded(&["explorer".into()])));
+    }
+
+    #[test]
+    fn exe_suffix_stripping_is_char_boundary_safe() {
+        // byte offset len-4 falls inside a character for these; they used to panic
+        for name in ["記事本", "遊戲", "é", "aé", "記事本.EXE", "ab😀"] {
+            let _ = is_browser(Some(name));
+            let _ = strip_exe_everywhere(name);
+        }
+        assert_eq!(strip_exe_suffix("記事本"), "記事本");
+        assert_eq!(strip_exe_suffix("記事本.EXE"), "記事本");
+        assert_eq!(strip_exe_suffix(".exe"), "");
+        assert_eq!(strip_exe_suffix("exe"), "exe");
+        assert!(!is_browser(Some("遊戲")));
+        assert!(is_browser(Some("  Chrome.exe ")));
+        let ex = normalize_excluded(&["記事本.exe".into(), "遊戲.EXE.exe".into()]);
+        assert!(ex.contains("記事本") && ex.contains("遊戲"));
     }
 
     #[test]

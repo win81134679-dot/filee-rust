@@ -382,25 +382,21 @@ fn build() {
     }
     order.extend(table.formats.iter().map(|f| f.id.clone()));
     let mut done_count = 0;
+    // Sources whose `filee-cli formats <id>` failed this run: not cached (they stay unknown, so nothing is dimmed on
+    // a guess), skipped by the sweep, and asked again only when a drag requests them or at the next start.
+    let mut failed: std::collections::HashSet<String> = std::collections::HashSet::new();
     let started = std::time::Instant::now();
     loop {
         let next = {
             let requested = REQUESTED.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
-            requested.or_else(|| order.iter().find(|id| !routes.per_source.contains_key(*id)).cloned())
+            requested.or_else(|| order.iter().find(|id| !routes.per_source.contains_key(*id) && !failed.contains(*id)).cloned())
         };
         let Some(id) = next else { break };
+        let id_for_cli = id.clone();
         if routes.per_source.contains_key(&id) {
             continue;
         }
-        match run_cli(&["formats", &id]) {
-            Some(text) => {
-                routes.per_source.insert(id, parse_targets(&text));
-            }
-            None => {
-                // A format the CLI does not know by that id: record an empty entry so it is not asked again.
-                routes.per_source.insert(id, Targets::default());
-            }
-        }
+        record_targets(&mut routes, &mut failed, id, run_cli(&["formats", &id_for_cli]));
         done_count += 1;
         if done_count % 20 == 0 {
             publish(&list_text, &routes);
@@ -408,9 +404,29 @@ fn build() {
         }
     }
     publish(&list_text, &routes);
-    save(&path, &version, &list_text, &routes, true);
-    BUILD_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+    // Only a sweep without failures is complete; otherwise the next start asks for the missing ones again.
+    let all_done = failed.is_empty();
+    save(&path, &version, &list_text, &routes, all_done);
+    if all_done {
+        BUILD_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+    } else {
+        warn!("Formats table: `filee-cli formats` failed for {} source format(s); they stay unknown until the next start", failed.len());
+    }
     info!("Formats table built: {} source formats in {:.0} s", routes.per_source.len(), started.elapsed().as_secs_f32());
+}
+
+/// Stores the outcome of one `filee-cli formats <id>` run. A failed run (`None`) is remembered in `failed` but not
+/// stored: an empty entry would be cached as the complete answer and dim every slice for that format.
+fn record_targets(routes: &mut Routes, failed: &mut std::collections::HashSet<String>, id: String, output: Option<String>) {
+    match output {
+        Some(text) => {
+            failed.remove(&id);
+            routes.per_source.insert(id, parse_targets(&text));
+        }
+        None => {
+            failed.insert(id);
+        }
+    }
 }
 
 fn publish(list_text: &str, routes: &Routes) {
@@ -431,6 +447,19 @@ mod tests {
     use super::*;
 
     const PNG_OUTPUT: &str = "PNG (png, png_large) converts to:\n  jpg, webp, tiff, bmp, gif, ico, avif, heic, jxl, jp2, psd, pdf, docx, mp4, dwg, dxf\nWith optional engines (install them in Filee, Settings \u{2192} Engines):\n  epub, mobi\n";
+
+    #[test]
+    fn a_failed_targets_query_is_not_cached_as_empty() {
+        let mut routes = Routes::default();
+        let mut failed = std::collections::HashSet::new();
+        record_targets(&mut routes, &mut failed, "png".into(), None);
+        assert!(!routes.per_source.contains_key("png"), "a failure leaves the format unknown");
+        assert!(failed.contains("png"));
+        // a later success replaces the failure
+        record_targets(&mut routes, &mut failed, "png".into(), Some(PNG_OUTPUT.to_string()));
+        assert_eq!(routes.per_source["png"], parse_targets(PNG_OUTPUT));
+        assert!(failed.is_empty());
+    }
 
     #[test]
     fn parses_the_formats_list() {

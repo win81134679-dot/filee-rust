@@ -23,6 +23,10 @@ const START_GRACE: Duration = Duration::from_secs(8);
 const MAX_COMMAND_CHARS: usize = 24_000;
 
 static SPAWNED: Mutex<Vec<(Child, Instant)>> = Mutex::new(Vec::new());
+/// When the settings window was last asked for (see [`open_settings`]).
+static LAST_SETTINGS: Mutex<Option<Instant>> = Mutex::new(None);
+/// Asking again within this long starts nothing: a double click on the tray icon is two clicks.
+const SETTINGS_REPEAT: Duration = Duration::from_secs(2);
 
 /// The mutex name of the hosted instance: upstream's `Filee-<first 12 hex of SHA-256(key)>` + `-lite`, where the key
 /// is the user name, plus `|<data folder, upper case>` when FILEE_DATA_DIR is set.
@@ -112,9 +116,22 @@ pub fn run_args(preset_id: &str, files: &[PathBuf]) -> Vec<String> {
     args
 }
 
-/// `Filee.exe --hosted --settings`.
+/// `Filee.exe --hosted --settings`. A running one shows its window when started again, so a repeat within
+/// [`SETTINGS_REPEAT`] (a double click) is dropped instead of starting a second 250 MB process that only hands over.
 pub fn open_settings() {
+    let now = Instant::now();
+    {
+        let mut last = LAST_SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+        if !settings_due(*last, now) {
+            return;
+        }
+        *last = Some(now);
+    }
     spawn(&["--hosted".to_string(), "--settings".to_string()]);
+}
+
+fn settings_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|at| now.saturating_duration_since(at) >= SETTINGS_REPEAT)
 }
 
 /// Upstream has no switch that opens one preset's editor, so this opens the settings window (where the donut
@@ -127,6 +144,14 @@ pub fn edit_preset(preset_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_double_click_opens_the_settings_once() {
+        let t0 = Instant::now();
+        assert!(settings_due(None, t0));
+        assert!(!settings_due(Some(t0), t0 + Duration::from_millis(100)));
+        assert!(settings_due(Some(t0), t0 + SETTINGS_REPEAT));
+    }
 
     #[test]
     fn mutex_name_follows_upstream() {

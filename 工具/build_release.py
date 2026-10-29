@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 5  # 2026-10-29: self-update (4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix)
+LITE_REV = 6  # 2026-10-29: save-race crash fix and bug sweep (5: self-update, 4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix)
 UPSTREAM = ROOT / "upstream"
 PUBLIC_KEY = ROOT / "packaging" / "update.pub"
 PATCH = ROOT / "patches" / "hosted.patch"
@@ -141,14 +142,41 @@ def portable_base(tag: str) -> Path:
     return extracted
 
 
+def local_path_leaks(folder: Path) -> list[str]:
+    """Files under `folder` naming this project's folder or the user's profile (UTF-8 or UTF-16): the installer goes
+    to other computers and to public releases."""
+    needles = {str(ROOT), str(Path.home())}
+    needles = [n.encode(enc) for n in needles for enc in ("utf-8", "utf-16-le")]
+    found = []
+    for p in folder.rglob("*"):
+        if p.is_file() and p.stat().st_size < 300_000_000:
+            data = p.read_bytes()
+            if any(n in data for n in needles):
+                found.append(str(p.relative_to(folder)))
+    return found
+
+
 def stage(tag: str, portable: Path, exe: Path, app_ver: str) -> None:
     if STAGE.exists():
         shutil.rmtree(STAGE)
     shutil.copytree(portable, STAGE / "app")
-    # Patched: Filee.dll (hosted mode, weekly engine update) and Filee.Engines.dll (Microsoft Office engine, 7-Zip
-    # MSI), which filee-cli.exe loads from the same folder.
-    for name in ("Filee.dll", "Filee.pdb", "Filee.xml", "Filee.Engines.dll", "Filee.Engines.pdb", "Filee.Engines.xml"):
-        shutil.copy2(PUBLISH / name, STAGE / "app" / name)
+    # Patched: Filee.dll (hosted mode, weekly engine update), Filee.Core.dll (saving waits out a file someone has
+    # open) and Filee.Engines.dll (Microsoft Office engine, 7-Zip MSI); filee-cli.exe loads the last two from the
+    # same folder. Every project the patch touches must be listed here, or the official DLL ships without the fix.
+    patched = ("Filee.dll", "Filee.pdb", "Filee.xml", "Filee.Core.dll", "Filee.Core.pdb", "Filee.Core.xml",
+               "Filee.Engines.dll", "Filee.Engines.pdb", "Filee.Engines.xml")
+    for project in sorted(set(re.findall(r"^diff --git a/src/([^/]+)/", PATCH.read_text(encoding="utf-8"), re.M))):
+        dll = "Filee.dll" if project == "Filee.App" else f"{project}.dll"
+        if dll not in patched:
+            raise Fail(f"the patch changes {project} but {dll} is not copied from our build")
+    for name in patched:
+        if (PUBLISH / name).exists():
+            shutil.copy2(PUBLISH / name, STAGE / "app" / name)
+        elif name.endswith(".pdb"):
+            # Ours is embedded in the DLL (see "3 dotnet publish"); the official one would not match it.
+            (STAGE / "app" / name).unlink(missing_ok=True)
+        else:
+            raise Fail(f"{name} missing from the publish folder")
     # The patched DLL must be the one that runs: same size class as the official one (fonts embedded).
     official = (portable / "Filee.dll").stat().st_size
     ours = (STAGE / "app" / "Filee.dll").stat().st_size
@@ -230,8 +258,17 @@ def main() -> int:
 
         step("3 dotnet publish")
         env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1")
+        # A full compile every time: an incremental one keeps DLLs built before PathMap/DebugType applied (with this
+        # computer's paths in them), since MSBuild doesn't count those properties as inputs.
+        for obj in (UPSTREAM / "src").glob("*/obj/Release/net10.0/win-x64"):
+            shutil.rmtree(obj, ignore_errors=True)
         run([str(DOTNET), "publish", str(UPSTREAM / "src" / "Filee.App" / "Filee.App.csproj"), "-c", "Release",
              "-r", "win-x64", "--self-contained", "-p:PublishReadyToRun=true", "-o", str(PUBLISH),
+             # The DLLs and PDBs name their source and obj paths; without this they carry this computer's folder.
+             f"-p:PathMap={UPSTREAM}=/_/upstream",
+             # ReadyToRun writes the obj\…\Filee.pdb path into Filee.dll regardless; an embedded PDB has none (and
+             # stack traces keep their line numbers).
+             "-p:DebugType=embedded",
              "-v:quiet", "-nologo"], env=env, quiet=True)
         print(f"Filee.dll {(PUBLISH / 'Filee.dll').stat().st_size:,} bytes")
 
@@ -246,10 +283,18 @@ def main() -> int:
             print("formats_default.txt regenerated for", tag)
 
         step("6 cargo")  # before staging: the stage needs the exe
+        # Panic locations name the crates' source folders (the cargo registry under the user's profile, this
+        # project). CARGO_ENCODED_RUSTFLAGS because the project path has spaces; tests get the same flags so the
+        # build is not done twice.
+        sep = "\x1f"
+        cargo_env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS=sep.join([
+            f"--remap-path-prefix={Path.home() / '.cargo'}=/cargo",
+            f"--remap-path-prefix={ROOT}=/_",
+        ]))
         if not args.skip_tests:
-            run(["cargo", "test", "--release", "--quiet"], cwd=SHELL, quiet=True)
+            run(["cargo", "test", "--release", "--quiet"], cwd=SHELL, quiet=True, env=cargo_env)
             print("cargo test: ok")
-        run(["cargo", "build", "--release", "--quiet"], cwd=SHELL, quiet=True)
+        run(["cargo", "build", "--release", "--quiet"], cwd=SHELL, quiet=True, env=cargo_env)
         exe = SHELL / "target" / "release" / "filee-rust.exe"
 
         step("5 stage")
@@ -258,6 +303,10 @@ def main() -> int:
 
         step("7 checks")
         smoke(tag)
+        leaks = local_path_leaks(STAGE)
+        if leaks:
+            raise Fail("the stage names this computer's folders: " + ", ".join(leaks[:5]))
+        print("no local paths in the stage")
 
         step("8 installer")
         iscc = next((p for p in ISCC_CANDIDATES if p.exists()), None)

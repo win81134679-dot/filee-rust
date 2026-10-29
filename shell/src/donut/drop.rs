@@ -31,6 +31,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
+        forget_virtual_files(); // a new drag never starts from the previous one's copies
         let (files, offered) = match pdataobj.as_ref() {
             Some(data) => {
                 let mut files = read_files(data);
@@ -55,6 +56,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
     }
 
     fn DragLeave(&self) -> windows::core::Result<()> {
+        forget_virtual_files();
         window::drag_leave();
         Ok(())
     }
@@ -74,6 +76,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
             }
             None => Vec::new(),
         };
+        forget_virtual_files(); // the drag is over; COM may reuse the data object's address for the next one
         unsafe {
             *pdweffect = window::drop_files(files, (pt.x, pt.y), *pdweffect);
         }
@@ -172,6 +175,11 @@ thread_local! {
     static LAST_VIRTUAL: std::cell::RefCell<Option<(usize, Vec<PathBuf>)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Ends the cache's life with the drag it belongs to (DragLeave, Drop, and the start of the next DragEnter).
+fn forget_virtual_files() {
+    LAST_VIRTUAL.with(|c| *c.borrow_mut() = None);
+}
+
 fn virtual_files_cached(data: &IDataObject) -> Vec<PathBuf> {
     let key = windows::core::Interface::as_raw(data) as usize;
     if let Some(files) = LAST_VIRTUAL.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, f)| f.clone())) {
@@ -182,6 +190,18 @@ fn virtual_files_cached(data: &IDataObject) -> Vec<PathBuf> {
     let files = read_virtual_files(data);
     LAST_VIRTUAL.with(|c| *c.borrow_mut() = Some((key, files.clone())));
     files
+}
+
+/// `FD_FILESIZE`: the descriptor's `nFileSizeHigh`/`nFileSizeLow` are only meaningful when this flag is set.
+const FD_FILESIZE: u32 = 0x40;
+
+/// The size a descriptor announces; 0 ("unknown") unless it sets `FD_FILESIZE`.
+fn descriptor_size(flags: u32, high: u32, low: u32) -> u64 {
+    if flags & FD_FILESIZE != 0 {
+        ((high as u64) << 32) | low as u64
+    } else {
+        0
+    }
 }
 
 /// Saves the virtual files of `data` (FileGroupDescriptorW + FileContents) and returns their paths.
@@ -212,7 +232,7 @@ fn read_virtual_files(data: &IDataObject) -> Vec<PathBuf> {
                 let d: FILEDESCRIPTORW = std::ptr::read_unaligned(first.add(i));
                 let file_name = d.cFileName;
                 let len = file_name.iter().position(|&c| c == 0).unwrap_or(file_name.len());
-                let size = ((d.nFileSizeHigh as u64) << 32) | d.nFileSizeLow as u64;
+                let size = descriptor_size(d.dwFlags, d.nFileSizeHigh, d.nFileSizeLow);
                 out.push((String::from_utf16_lossy(&file_name[..len]), size));
             }
         }
@@ -372,6 +392,13 @@ mod tests {
         let cut = safe_name(&long).unwrap();
         assert_eq!(cut.chars().count(), 120);
         assert!(cut.ends_with(".jpeg"));
+    }
+
+    #[test]
+    fn descriptor_size_is_trusted_only_with_fd_filesize() {
+        assert_eq!(descriptor_size(FD_FILESIZE, 1, 2), (1u64 << 32) | 2);
+        assert_eq!(descriptor_size(0x41, 0, 7), 7);
+        assert_eq!(descriptor_size(0, 1, 2), 0); // garbage in the size fields of a descriptor without the flag
     }
 
     #[test]

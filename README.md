@@ -115,6 +115,8 @@ flowchart LR
      - Calibre（電子書）
 
    圖片、資料（CSV、JSON、XML…）、2D 製圖（DXF、DWG）、PDF、向量、3D 模型的轉換都是內建的，不用另外裝。
+
+   按「完成」後 Filee Rust 會自動啟動，並打開設定視窗。最後一頁的「閱讀說明（README）」預設不勾。
 3. 電腦上有原版 Filee 的話，安裝程式會請它先結束。建議之後到「設定 → 應用程式」解除安裝原版，兩個同時開會跳兩個選單。
 4. 防毒軟體把 `filee-rust.exe` 擋下或刪掉的話，把安裝資料夾加入信任。它會偵測全域滑鼠鍵盤（只聽不攔），
    沒簽章的程式這樣做容易被誤判。
@@ -332,6 +334,7 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 7. Microsoft Office 轉換器（新檔 `Filee.Engines/Office/MicrosoftOfficeConverter.cs`），排在 LibreOffice 前面，失敗就交給 LibreOffice。
 8. 引擎安裝器能解開 7-Zip 的 MSI。
 9. 英文與繁中的引擎說明。
+10. 存設定時如果檔案剛好被別的程式開著（Filee Rust 在讀、防毒在掃），會等最多 2 秒再存；還是存不進去只記錄，不會讓視窗閃退。
 
 ## 專案結構
 

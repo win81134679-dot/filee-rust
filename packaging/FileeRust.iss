@@ -85,8 +85,8 @@ zhtw.EngCalibre=Calibre（電子書 EPUB／Kindle；約 226 MB）
 en.EngCalibre=calibre (e-books: EPUB, Kindle; ~226 MB)
 zhtw.OriginalFilee=這台電腦也裝了原版 Filee。兩者同時執行會各自偵測 Ctrl 拖曳、跳出兩個環形選單。%n%n建議安裝後到「設定 > 應用程式」解除安裝原版 Filee（設定與預設會保留，Filee Rust 共用同一份）。安裝程式會先請原版 Filee 結束。
 en.OriginalFilee=The original Filee is installed too. Running both makes two donuts appear for every Ctrl-drag.%n%nUninstall the original Filee in Settings > Apps afterwards (settings and presets stay; Filee Rust uses the same ones). Setup asks the original Filee to exit now.
-zhtw.LaunchNow=啟動 Filee Rust
-en.LaunchNow=Start Filee Rust
+zhtw.ViewReadme=閱讀說明（README）
+en.ViewReadme=Read the README
 
 [Tasks]
 Name: "startup"; Description: "{cm:TaskStartup}"
@@ -106,7 +106,7 @@ Source: "{#Stage}\app\*"; DestDir: "{app}\app"; Excludes: "\engines\7zip"; Flags
 Source: "{#Stage}\app\engines\7zip\*"; DestDir: "{app}\app\engines\7zip"; Tasks: sevenzip; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#Stage}\i18n\*"; DestDir: "{app}\i18n"; Flags: ignoreversion
 Source: "{#Stage}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
-Source: "{#Stage}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "{#Stage}\README.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\filee.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Self-update (shell\src\core\self_update.rs): this build's version and the key its releases are signed with.
 Source: "{#Stage}\version.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -126,7 +126,9 @@ Root: HKCU; Subkey: "Software\Classes\*\shell\FileeLite"; Flags: uninsdeletekey 
 
 [Run]
 Filename: "{app}\app\Filee.exe"; Parameters: "--hosted --background --install-engines={code:EngineList}"; Check: WantsEngines; Flags: nowait skipifsilent
-Filename: "{app}\filee-rust.exe"; Parameters: "--background"; Description: "{cm:LaunchNow}"; Flags: nowait postinstall skipifsilent
+; Filee Rust itself is not a choice here: it always starts, with its settings window, once Finish is clicked
+; (CurStepChanged ssDone). Only the README is offered, unticked.
+Filename: "{app}\README.txt"; Description: "{cm:ViewReadme}"; Flags: postinstall shellexec skipifsilent unchecked
 
 [InstallDelete]
 ; Upgrading from Filee Lite (the name before 2026-10-29): its exe and Start menu entry. The AppId, the data folder
@@ -230,7 +232,12 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Flag: String;
+  Code: Integer;
 begin
+  // After Finish: start Filee Rust with its settings window, as the signed-in user even when Setup is elevated.
+  // A silent self-update restarts it in the background instead (DeinitializeSetup).
+  if (CurStep = ssDone) and not WizardSilent() then
+    ExecAsOriginalUser(ExpandConstant('{app}\filee-rust.exe'), '--settings', '', SW_SHOWNORMAL, ewNoWait, Code);
   // filee-rust.exe skips the weekly engine update while this file exists (core::engine_update).
   if CurStep = ssPostInstall then
   begin

@@ -169,6 +169,14 @@ fn main() {
     }
     input::stop();
     ui::tray::remove();
+    // COM objects (Direct2D, DirectWrite, the OLE drop target) go before COM itself, not in thread-local destructors
+    // at process exit: the process faulted in KERNELBASE right after "exited" (0x87A, 2026-10-29).
+    donut::shutdown();
+    ui::toast::shutdown();
+    unsafe {
+        windows::Win32::System::Ole::OleUninitialize();
+        windows::Win32::System::Com::CoUninitialize();
+    }
     info!("Filee Rust exited");
 }
 
@@ -319,6 +327,9 @@ fn handle_event(event: AppEvent) {
         }
         AppEvent::DataChanged => {
             let settings = core::store::settings();
+            if ui::i18n::set_language(settings.get("language").and_then(|v| v.as_str()).unwrap_or("auto")) {
+                ui::toast::language_changed();
+            }
             let palette = ui::theme::palette(&settings);
             ui::toast::set_palette(&palette);
             donut::set_style(&palette, settings.get("donut").unwrap_or(&serde_json::Value::Null));

@@ -142,6 +142,17 @@ pub fn init() {
     }
 }
 
+/// At exit, before COM is uninitialised: releases the Direct2D/DirectWrite objects here instead of in the thread-local
+/// destructors that run while the process is already being torn down.
+pub fn shutdown() {
+    let _ = TOAST.try_with(|t| t.try_borrow_mut().map(|mut t| t.take()));
+}
+
+/// The language changed: the text layouts are rebuilt with its locale (fonts fall back per language).
+pub fn language_changed() {
+    with(|t| t.gfx = None);
+}
+
 /// New colours / fonts / motion setting; redraws what is on screen.
 pub fn set_palette(palette: &Palette) {
     with(|t| {
@@ -491,7 +502,9 @@ fn click(t: &mut Toast, id: u64, kind: BtnKind) -> Option<Action> {
             let closed = t.cards.remove(index);
             if closed.job.state == JobState::Running {
                 t.dismissed.push(id);
-                t.dismissed.truncate(64);
+                // Keep the newest 64.
+                let excess = t.dismissed.len().saturating_sub(64);
+                t.dismissed.drain(..excess);
             }
             t.hover = None;
             None

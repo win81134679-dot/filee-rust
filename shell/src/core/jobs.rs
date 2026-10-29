@@ -55,8 +55,85 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 struct Handle {
-    child: Mutex<Option<Child>>,
+    child: Mutex<Option<RunningChild>>,
     cancelled: AtomicBool,
+}
+
+/// A Win32 job object that kills every process in it when closed. The CLI starts ffmpeg, soffice and the like;
+/// killing only the CLI would leave them running (and holding its output pipes open).
+struct KillOnClose(isize);
+
+impl KillOnClose {
+    /// A job holding `child`; None when Windows refuses (the child is then killed on its own).
+    fn containing(child: &Child) -> Option<KillOnClose> {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        unsafe {
+            let job = CreateJobObjectW(None, windows::core::PCWSTR::null()).ok()?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let set = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if set.is_err() || AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())).is_err() {
+                let _ = CloseHandle(job);
+                return None;
+            }
+            Some(KillOnClose(job.0 as isize))
+        }
+    }
+
+    fn terminate(&self) {
+        use windows::Win32::Foundation::HANDLE;
+        let _ = unsafe { windows::Win32::System::JobObjects::TerminateJobObject(HANDLE(self.0 as *mut std::ffi::c_void), 1) };
+    }
+}
+
+impl Drop for KillOnClose {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        let _ = unsafe { CloseHandle(HANDLE(self.0 as *mut std::ffi::c_void)) };
+    }
+}
+
+/// The CLI process of the running chunk and the job that holds it and its descendants.
+struct RunningChild {
+    child: Child,
+    job: Option<KillOnClose>,
+}
+
+impl RunningChild {
+    fn new(child: Child) -> RunningChild {
+        let job = KillOnClose::containing(&child);
+        RunningChild { child, job }
+    }
+
+    /// The whole process tree, or just the CLI when no job could be made.
+    fn kill(&mut self) {
+        match &self.job {
+            Some(job) => job.terminate(),
+            None => {
+                let _ = self.child.kill();
+            }
+        }
+    }
+}
+
+/// Puts a freshly started chunk where `cancel` can find it. A cancel that landed before this point (after the
+/// caller's flag check) found nothing to kill, so the flag is checked again under the same lock `cancel` takes.
+fn adopt(handle: &Handle, mut running: RunningChild) {
+    let mut slot = lock(&handle.child);
+    if handle.cancelled.load(Ordering::SeqCst) {
+        running.kill();
+    }
+    *slot = Some(running);
 }
 
 /// What one run of the CLI is asked to do.
@@ -141,8 +218,8 @@ pub fn run_blocking(spec: &JobSpec) -> Outcome {
 pub fn cancel(id: u64) -> Option<String> {
     let handle = lock(&RUNNING).iter().find(|(i, _)| *i == id).map(|(_, h)| h.clone())?;
     handle.cancelled.store(true, Ordering::SeqCst);
-    if let Some(child) = lock(&handle.child).as_mut() {
-        let _ = child.kill();
+    if let Some(running) = lock(&handle.child).as_mut() {
+        running.kill();
     }
     let note = "Cancelled. Files already converted keep their results; the file being converted may leave a partial \
                 output next to it, and upstream's temporary folder in %TEMP%\\Filee is cleaned the next time Filee starts."
@@ -227,7 +304,7 @@ fn execute(id: u64, spec: &JobSpec) -> Outcome {
         };
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        *lock(&handle.child) = Some(child);
+        adopt(&handle, RunningChild::new(child));
         let err_thread = stderr.map(|mut s| {
             std::thread::spawn(move || {
                 let mut buf = Vec::new();
@@ -236,6 +313,8 @@ fn execute(id: u64, spec: &JobSpec) -> Outcome {
             })
         });
 
+        let results_before = results.len();
+        let mut saw_stats = false;
         if json_mode {
             // A merge writes one result for all files, which the human mode does not print: read the JSON at the end.
             let mut buf = Vec::new();
@@ -265,6 +344,7 @@ fn execute(id: u64, spec: &JobSpec) -> Outcome {
                 let text = String::from_utf8_lossy(&bytes);
                 let text = text.trim_end_matches('\r');
                 if let Some(total) = parse_stats_line(text) {
+                    saw_stats = true;
                     stats_total = Some(stats_total.unwrap_or(0) + total);
                     continue;
                 }
@@ -284,12 +364,29 @@ fn execute(id: u64, spec: &JobSpec) -> Outcome {
                 }
             }
         }
+        let mut chunk_stderr = String::new();
         if let Some(t) = err_thread {
-            stderr_text.push_str(&t.join().unwrap_or_default());
+            chunk_stderr = t.join().unwrap_or_default();
+            stderr_text.push_str(&chunk_stderr);
         }
-        let child = lock(&handle.child).take();
-        if let Some(mut child) = child {
-            exit_code = child.wait().ok().and_then(|s| s.code());
+        let running = lock(&handle.child).take();
+        let mut chunk_exit: Option<i32> = None;
+        if let Some(mut running) = running {
+            chunk_exit = running.child.wait().ok().and_then(|s| s.code());
+            exit_code = chunk_exit;
+            // `running.job` closes here and takes any leftover descendants with it.
+        }
+        // A CLI that died or stopped early never reported some files: they did not convert, so they failed.
+        if !handle.cancelled.load(Ordering::SeqCst)
+            && chunk_incomplete(chunk_exit, saw_stats || json_mode, results.len() > results_before)
+        {
+            let why = unreported_reason(chunk_exit, &chunk_stderr);
+            for source in unreported_sources(&chunk, &results[results_before..]) {
+                status.failed += 1;
+                status.errors.push(format!("{}: {why}", source.display()));
+                results.push(FileResult { source, state: FileState::Failed, outputs: Vec::new(), error: Some(why.clone()) });
+            }
+            post(&status);
         }
     }
 
@@ -394,6 +491,40 @@ pub fn parse_json_results(text: &str) -> Option<Vec<FileResult>> {
             })
             .collect(),
     )
+}
+
+/// Did the CLI end a chunk without finishing it? A non-zero (or missing) exit code says so. A clean exit does too
+/// when the human mode printed some results but never the final `Converted N of M` line (`summary_seen` is passed as
+/// true for the JSON mode, which prints once at the end and has no such line).
+pub fn chunk_incomplete(exit_code: Option<i32>, summary_seen: bool, printed_results: bool) -> bool {
+    exit_code != Some(0) || (printed_results && !summary_seen)
+}
+
+fn unreported_reason(exit_code: Option<i32>, stderr: &str) -> String {
+    let mut why = match exit_code {
+        Some(code) => format!("filee-cli stopped (exit code {code}) before reporting this file"),
+        None => "filee-cli ended abnormally before reporting this file".to_string(),
+    };
+    if let Some(line) = stderr.lines().map(str::trim).find(|l| !l.is_empty()) {
+        why.push_str(": ");
+        why.push_str(line.trim_start_matches("filee: "));
+    }
+    why
+}
+
+/// The sources of a chunk that none of its results account for. A folder counts as accounted for when some result
+/// lies inside it (the CLI expands folders and reports their files).
+pub fn unreported_sources(chunk: &[PathBuf], results: &[FileResult]) -> Vec<PathBuf> {
+    let reported: Vec<String> = results.iter().map(|r| util::path_key(&r.source)).collect();
+    chunk
+        .iter()
+        .filter(|source| {
+            let key = util::path_key(source);
+            let folder_prefix = format!("{}\\", key.trim_end_matches(['\\', '/']));
+            !reported.iter().any(|r| *r == key || r.starts_with(&folder_prefix))
+        })
+        .cloned()
+        .collect()
 }
 
 /// `JobQueue`'s rule: cancelled, or all files done/skipped → Completed, some done → with errors, else Failed.
@@ -628,6 +759,73 @@ mod tests {
         }
         assert_eq!(chunks(&[]).len(), 1);
         assert_eq!(chunks(&files[..3]).len(), 1);
+    }
+
+    fn result(path: &str, state: FileState) -> FileResult {
+        FileResult { source: PathBuf::from(path), state, outputs: Vec::new(), error: None }
+    }
+
+    #[test]
+    fn files_the_cli_never_reported_are_found() {
+        let chunk = srcs(&[r"C:\in\a.png", r"C:\in\b.png", r"C:\in\dir"]);
+        let results = vec![result(r"c:\IN\A.png", FileState::Done), result(r"C:\in\dir\x.png", FileState::Done)];
+        // a.png matches ignoring case, dir is covered by a file inside it, b.png was never reported
+        assert_eq!(unreported_sources(&chunk, &results), srcs(&[r"C:\in\b.png"]));
+        assert_eq!(unreported_sources(&chunk, &[]).len(), 3);
+        // a sibling that merely starts with the same letters does not cover a folder
+        assert_eq!(unreported_sources(&srcs(&[r"C:\in\dir"]), &[result(r"C:\in\dir2\x.png", FileState::Done)]).len(), 1);
+    }
+
+    #[test]
+    fn a_chunk_is_incomplete_on_a_bad_exit_or_a_missing_summary() {
+        assert!(chunk_incomplete(Some(1), true, true));
+        assert!(chunk_incomplete(None, true, true)); // killed or never waited for
+        assert!(chunk_incomplete(Some(0), false, true)); // output ended before the final line
+        assert!(!chunk_incomplete(Some(0), true, true));
+        assert!(!chunk_incomplete(Some(0), false, false)); // silent success: the exit code is trusted
+        assert!(chunk_incomplete(Some(2), false, false));
+    }
+
+    #[test]
+    fn the_unreported_reason_names_the_exit_code_and_first_stderr_line() {
+        assert_eq!(
+            unreported_reason(Some(3), "\nfilee: no engine\nmore"),
+            "filee-cli stopped (exit code 3) before reporting this file: no engine"
+        );
+        assert_eq!(unreported_reason(None, ""), "filee-cli ended abnormally before reporting this file");
+    }
+
+    fn sleeper() -> Child {
+        std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("ping")
+    }
+
+    #[test]
+    fn cancel_before_the_child_is_stored_still_kills_it() {
+        let handle = Handle { child: Mutex::new(None), cancelled: AtomicBool::new(false) };
+        handle.cancelled.store(true, Ordering::SeqCst); // cancel landed after the flag check, before adopt
+        adopt(&handle, RunningChild::new(sleeper()));
+        let mut running = lock(&handle.child).take().expect("stored");
+        let started = std::time::Instant::now();
+        assert!(running.child.wait().is_ok());
+        assert!(started.elapsed().as_secs() < 10, "the child was killed, not waited out");
+    }
+
+    #[test]
+    fn cancel_terminates_the_whole_job() {
+        let handle = Handle { child: Mutex::new(None), cancelled: AtomicBool::new(false) };
+        adopt(&handle, RunningChild::new(sleeper()));
+        assert!(lock(&handle.child).as_ref().is_some_and(|r| r.job.is_some()), "a job object holds the child");
+        lock(&handle.child).as_mut().unwrap().kill();
+        let mut running = lock(&handle.child).take().unwrap();
+        let started = std::time::Instant::now();
+        assert!(running.child.wait().is_ok());
+        assert!(started.elapsed().as_secs() < 10);
     }
 
     #[test]

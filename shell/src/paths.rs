@@ -65,8 +65,14 @@ pub fn data_dir() -> &'static Path {
 pub fn lite_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        let dir = local.join("FileeLite");
+        // Tests (unit and integration) never touch the user's folder: its log, machine id, update state and
+        // formats cache are what to read when a machine misbehaves.
+        let dir = if cfg!(test) {
+            std::env::temp_dir().join("filee-rust-test-lite")
+        } else {
+            let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+            local.join("FileeLite")
+        };
         let _ = std::fs::create_dir_all(&dir);
         dir
     })

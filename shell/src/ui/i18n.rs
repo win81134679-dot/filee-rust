@@ -34,6 +34,16 @@ pub fn init(language: &str) {
     *STATE.write().unwrap_or_else(|e| e.into_inner()) = Some(State { lang, current, english });
 }
 
+/// The language setting changed in upstream's settings window: load the new one, only when it resolves to another
+/// language than the one in use. True when it did.
+pub fn set_language(language: &str) -> bool {
+    if resolve_language(language, &os_ui_language()) == current() {
+        return false;
+    }
+    init(language);
+    true
+}
+
 /// Code of the language in use (`zh-TW` …); `en` before [`init`].
 pub fn current() -> String {
     STATE.read().unwrap_or_else(|e| e.into_inner()).as_ref().map(|s| s.lang.clone()).unwrap_or_else(|| "en".into())
