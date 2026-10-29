@@ -462,3 +462,39 @@ fn pdf_donut_has_the_office_group_and_it_converts() {
     }
     let _ = std::fs::remove_file(&marker);
 }
+
+/// The self-update as filee-rust.exe runs it, against a fake GitHub (FILEE_RUST_UPDATE_API, inherited by the child):
+/// FILEE_LITE_APP = a Filee.exe build with --self-update, FILEE_RUST_TEST_KEY = the test public key,
+/// FILEE_RUST_TEST_DIR = an empty download folder. The fake serves 2.2.0-rust.6 for every machine.
+#[test]
+#[ignore]
+fn self_update_finds_downloads_and_verifies_a_newer_release() {
+    use crate::core::self_update::{self, Line};
+    use std::io::{BufRead, BufReader};
+    let (Some(key), Some(dir)) = (std::env::var_os("FILEE_RUST_TEST_KEY"), std::env::var_os("FILEE_RUST_TEST_DIR")) else {
+        panic!("set FILEE_RUST_TEST_KEY, FILEE_RUST_TEST_DIR and FILEE_RUST_UPDATE_API");
+    };
+    let run = |current: &str| -> Vec<Line> {
+        let mut child = self_update::command(current, std::path::Path::new(&key), "AAAA-BBBB", std::path::Path::new(&dir))
+            .spawn()
+            .unwrap();
+        let lines: Vec<Line> = BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .map(|l| self_update::parse_line(&l))
+            .filter(|l| !matches!(l, Line::Progress(..)))
+            .collect();
+        assert!(child.wait().unwrap().success());
+        lines
+    };
+    let newer = run("2.2.0-rust.5");
+    println!("{newer:?}");
+    match newer.last() {
+        Some(Line::Ready(v, path)) => {
+            assert_eq!(v, "2.2.0-rust.6");
+            assert!(path.exists(), "{}", path.display());
+        }
+        other => panic!("expected ready, got {other:?}"),
+    }
+    assert_eq!(run("2.2.0-rust.6"), [Line::Current("2.2.0-rust.6".into())]);
+}

@@ -24,6 +24,7 @@
 - [安裝](#安裝)
 - [使用](#使用)
 - [轉換引擎](#轉換引擎)
+- [自動更新](#自動更新)
 - [設定與檔案位置](#設定與檔案位置)
 - [從原始碼建置](#從原始碼建置)
 - [上游出新版時](#上游出新版時)
@@ -91,6 +92,8 @@ flowchart LR
 | PDF 轉 Office | PDF 選單的「轉成 Office」群組：DOCX、XLSX、PPTX（取代只在多選時有用的「合併 PDF」，只改一次，之後照你的設定） |
 | Microsoft Office 優先 | Office 文件用你電腦上的 Word／Excel／PowerPoint 轉，不能用時改用 LibreOffice（見下方〈轉換引擎〉） |
 | 每週引擎更新 | 背景靜默更新轉換引擎，不開視窗、不打擾 |
+| 自動更新 | Filee Rust 自己從 GitHub Release 更新到新版（只收發佈者簽過名的版本）；系統匣可手動「檢查更新」 |
+| 本機識別碼 | 每台一組隨機識別碼，發佈者可以只把新版推給指定的電腦 |
 
 ## 安裝
 
@@ -128,6 +131,8 @@ flowchart LR
 | 翻到背面（更多格式） | 選單開著時按 **Tab** 或滾輪 |
 | 設定 | 點系統匣的 Filee 圖示（開上游的設定視窗）；開始功能表的「Filee Rust」也是 |
 | 暫停／結束 | 系統匣右鍵 |
+| 檢查更新 | 系統匣右鍵 →「檢查更新」 |
+| 看本機識別碼 | 系統匣右鍵 →「檢查更新」下面那一項「本機識別碼：XXXX-XXXX（電腦名稱，點一下複製）」 |
 
 指令列：
 
@@ -167,15 +172,68 @@ repo、conda 同一個 channel），而且版本要比較新，否則不採用�
 - 裝成「所有使用者」（Program Files）時，內建 7-Zip 沒有寫入權限，要等重裝新版才會更新。
 - 不另外建立 Windows 排程工作，由常駐的外殼自己計時。
 
+## 自動更新
+
+Filee Rust 會自己更新，使用者不用重裝：
+
+- 開機後檢查一次，之後每天一次，看 [GitHub Releases](https://github.com/win81134679-dot/filee-rust/releases)
+  有沒有比自己新、而且是給這台電腦的版本。只升不降。
+- **只收發佈者簽過名的版本**：每個 Release 附 `update.json`（版本、安裝檔名稱、大小、SHA-256、要給哪幾台）與
+  `update.sig`（ECDSA P-256 簽名）。安裝檔裡附的公鑰 `update.pub` 驗不過的一律不收，所以就算有人換掉 Release 上的檔案，
+  已安裝的電腦也不會裝它。
+- 有新版就在背景下載（可以續傳，網路慢也沒關係），驗過大小、SHA-256 與簽名才算數。
+- 在**沒有轉檔、沒開設定或工具視窗、插著電、2 分鐘沒動滑鼠鍵盤**時靜默安裝，裝完自動重新啟動，設定都保留；
+  安裝失敗也會把原本的 Filee Rust 開回來。
+- 失敗就只寫紀錄（`logs\self-update.log`），隔天再試，不跳任何通知。
+- 系統匣的「檢查更新」是手動版：會用通知回報結果，有新版就馬上下載並安裝（轉檔中會等轉完）。
+- 每台第一次啟動時產生一組隨機的**本機識別碼**（例如 `K7Q2-9XMA`，由亂數產生，不是從電腦名稱算出來的）。
+  系統匣右鍵的「檢查更新」下面就是它，旁邊附這台的電腦名稱。點一下會複製一行：
+  `Filee Rust 本機識別碼 K7Q2-9XMA（電腦 PC-ALICE，使用者 alice，版本 2.2.0-rust.5）`，
+  同事貼給發佈者，發佈者就知道這組識別碼是哪一台。電腦名稱只在本機顯示，不會上傳，也不會寫進 Release。
+- 不自動更新的情況：
+  - 裝成「所有使用者」（Program Files），因為更新要系統管理員權限
+  - 自己從原始碼編的開發版（沒有 `version.txt`）
+  - `lite.json` 設了 `"autoUpdate": false`（手動「檢查更新」仍然可以用）
+
+### 發佈新版（發佈者）
+
+第一次先產生簽名金鑰（兩種擇一）：
+
+```powershell
+uv run 工具\publish.py new-key                      # 自己在終端機設密碼，之後每次發佈都要輸入
+uv run 工具\publish.py new-key --generate-password  # 亂數密碼存在 keys\update-signing-password.txt，發佈時不再問
+# 私鑰 keys\update-signing.pem（不進 git，用密碼加密）；公鑰 packaging\update.pub（要 commit）
+```
+
+把整個 `keys\` 資料夾另外存一份到隨身碟。**私鑰弄丟，已安裝的電腦就再也收不到更新**，只能每台手動重裝。
+
+每次發佈（在自己電腦試過新的安裝檔之後）：
+
+```powershell
+python 工具\build_release.py                         # 建出 dist\FileeRust-<版本>-Setup.exe
+python 工具\update.py --publish                      # 給每一台：簽名、以預先發行版上傳 GitHub Release
+python 工具\update.py --publish --machines K7Q2-9XMA # 只給這幾台（逗號分隔；也可以用 工具\machines.json 裡的名字）
+python 工具\update.py --open v2.2.0-rust.6           # 之前只給幾台的版本，開放給每一台
+```
+
+`工具\machines.json`（不進 git）記你自己的對照，例如 `{"王老師": "K7Q2-9XMA"}`，之後 `--machines 王老師` 就好。
+對照怎麼來：請同事在系統匣點「本機識別碼」，把複製的那一行傳給你（含電腦名稱、使用者與目前版本）。
+Filee Rust 不會回報任何資料，所以只有這個方法知道哪一台是哪一台。
+要退回舊版時，把舊的內容重新編成**更高的版本號**再發佈。
+
+需要 [uv](https://docs.astral.sh/uv/)（會自動帶 `cryptography`）與已登入的 [GitHub CLI](https://cli.github.com/)（`gh auth login`）。
+
 ## 設定與檔案位置
 
 | 位置 | 內容 |
 |---|---|
 | `%APPDATA%\Filee\` | 跟上游共用：`settings.json`、`presets.json`、`profiles.json`、`history.json` |
 | `%LOCALAPPDATA%\FileeLite\logs\` | 外殼的每日紀錄 `filee-rust-YYYYMMDD.log`、引擎更新紀錄 `engine-update.log` |
-| `%LOCALAPPDATA%\FileeLite\lite.json` | `{"force300Dpi": false}` 可關掉 300 DPI 政策（沒有這個檔＝開） |
+| `%LOCALAPPDATA%\FileeLite\lite.json` | `{"force300Dpi": false}` 關掉 300 DPI 政策；`{"autoUpdate": false}` 關掉自動更新（沒有這個檔＝都開） |
 | `%LOCALAPPDATA%\FileeLite\engine-update.json` | 每週更新的狀態；`"enabled": false` 關掉 |
 | `%LOCALAPPDATA%\FileeLite\policy.json` | 記錄一次性的調整（PDF 選單）已經做過 |
+| `%LOCALAPPDATA%\FileeLite\machine-id.txt` | 本機識別碼 |
+| `%LOCALAPPDATA%\FileeLite\self-update.json`、`updates\` | 自動更新的狀態與下載中的安裝檔 |
 | `%LOCALAPPDATA%\Filee\engines\` | Filee 下載的引擎 |
 | `%LOCALAPPDATA%\Filee\msoffice-check.json` | Microsoft Office 試轉結果（Office 改版就重測，失敗的隔天重測） |
 
@@ -270,9 +328,10 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 3. hosted 版的單一執行個體名稱加 `-lite`，不會轉送給同時開著的原版 Filee。
 4. `--hosted --update-engines`：每週引擎更新，不開視窗、不拿單一執行個體鎖。
 5. `--hosted --seed-data`：新電腦沒有 `presets.json`／`profiles.json` 時，用上游自己的格式寫出預設。
-6. Microsoft Office 轉換器（新檔 `Filee.Engines/Office/MicrosoftOfficeConverter.cs`），排在 LibreOffice 前面，失敗就交給 LibreOffice。
-7. 引擎安裝器能解開 7-Zip 的 MSI。
-8. 英文與繁中的引擎說明。
+6. `--hosted --self-update`：Filee Rust 自己的更新（查 Release、比版本與本機識別碼、續傳下載、驗 SHA-256 與簽名）。
+7. Microsoft Office 轉換器（新檔 `Filee.Engines/Office/MicrosoftOfficeConverter.cs`），排在 LibreOffice 前面，失敗就交給 LibreOffice。
+8. 引擎安裝器能解開 7-Zip 的 MSI。
+9. 英文與繁中的引擎說明。
 
 ## 專案結構
 
@@ -280,7 +339,8 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 |---|---|
 | `shell\` | Rust 原始碼（crate `filee-rust`） |
 | `patches\hosted.patch`、`patches\UPSTREAM_TAG` | 對上游的補丁，與它對應的上游版本 |
-| `工具\` | `update.py`（閉環）、`build_release.py`（建置封裝）、`test_install.py`（靜默安裝測試）、字型下載、300 DPI、畫圖 |
+| `packaging\update.pub` | 自動更新驗簽名用的公鑰（私鑰 `keys\` 不在 repo） |
+| `工具\` | `update.py`（閉環）、`build_release.py`（建置封裝）、`publish.py`（簽名發佈）、`test_install.py`（靜默安裝測試）、字型下載、300 DPI、畫圖 |
 | `packaging\` | Inno Setup 腳本與繁中語言檔 |
 | `docs\spec\` | 移植規格：01 觸發與環形選單、02 資料與轉檔工作、03 通知／系統匣／主題 |
 | `docs\upstream-diffs\` | 每次升版的差異報告 |
@@ -294,7 +354,7 @@ python 工具\update.py --save-patch  # 改了 upstream\ 之後存回 patches\ho
 - 上游角落的提示（有新版、回饋、格式請求、缺字型）沒有做。
 - 自動轉換資料夾不支援 `/正規表達式/` 規則（glob 可以）。
 - 取消是直接結束轉檔程式，可能留下轉到一半的檔。
-- 安裝檔沒有簽章。
+- 安裝檔沒有程式碼簽章：Windows 會跳 SmartScreen，自動更新「下載後靜默執行安裝檔」也可能被防毒軟體當成可疑行為，需要把安裝資料夾加入信任。
 - 只支援 Windows（上游另有 macOS／Linux 版，這裡只取代 Windows 的常駐層）。
 
 ## 授權

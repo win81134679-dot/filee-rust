@@ -7,6 +7,9 @@
   python 工具/update.py --rebuild  build the current tag again (after a shell/ change)
   python 工具/update.py --save-patch  write upstream/'s changes (new files too) into patches/hosted.patch
   python 工具/update.py --init     fresh clone: fetch upstream at patches/UPSTREAM_TAG into upstream/, patch on
+  python 工具/update.py --publish [--machines A,B]  sign the newest dist/ installer, upload it as a GitHub
+                                   pre-release; installed copies update themselves (工具/publish.py, asks the password)
+  python 工具/update.py --open v2.2.0-rust.5        open a release made for some machines to every machine
 
 What it does for a new tag:
   1. git fetch the tag into upstream/ (sparse: src/, docs/, root files; no build scripts are checked out)
@@ -245,7 +248,15 @@ def main() -> int:
     ap.add_argument("--no-build", action="store_true", help="move + report only (tests the loop)")
     ap.add_argument("--save-patch", action="store_true", help="upstream/ changes → patches/hosted.patch")
     ap.add_argument("--init", action="store_true", help="fresh clone: fetch upstream at patches/UPSTREAM_TAG")
+    ap.add_argument("--publish", action="store_true", help="newest dist/ installer → signed GitHub pre-release")
+    ap.add_argument("--machines", help="with --publish: only these machine ids / machines.json names")
+    ap.add_argument("--open", metavar="TAG", help="a release made for some machines → every machine")
     args = ap.parse_args()
+    if args.publish or args.open:
+        tool = ["uv", "run", "--quiet", str(ROOT / "工具" / "publish.py")]
+        if args.open:
+            return subprocess.run(tool + ["open", args.open]).returncode
+        return subprocess.run(tool + ["publish"] + (["--machines", args.machines] if args.machines else [])).returncode
     if args.init:
         init_upstream()
         return 0

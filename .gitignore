@@ -12,3 +12,6 @@
 /.impeccable/
 /*.url
 /*.png
+# Self-update signing: the private key and your names for machine ids never go public
+/keys/
+/工具/machines.json

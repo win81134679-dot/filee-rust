@@ -26,8 +26,9 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LITE_REV = 4  # 2026-10-29: renamed Filee Lite -> Filee Rust (3: PDF Office group, 2: the empty-donut fix)
+LITE_REV = 5  # 2026-10-29: self-update (4: renamed to Filee Rust, 3: PDF Office group, 2: empty-donut fix)
 UPSTREAM = ROOT / "upstream"
+PUBLIC_KEY = ROOT / "packaging" / "update.pub"
 PATCH = ROOT / "patches" / "hosted.patch"
 BUILD = ROOT / "build"
 STAGE = BUILD / "stage"
@@ -140,7 +141,7 @@ def portable_base(tag: str) -> Path:
     return extracted
 
 
-def stage(tag: str, portable: Path, exe: Path) -> None:
+def stage(tag: str, portable: Path, exe: Path, app_ver: str) -> None:
     if STAGE.exists():
         shutil.rmtree(STAGE)
     shutil.copytree(portable, STAGE / "app")
@@ -162,12 +163,20 @@ def stage(tag: str, portable: Path, exe: Path) -> None:
     shutil.copy2(ROOT / "LICENSE", licenses / "FileeRust-LICENSE.txt")
     shutil.copy2(PATCH, licenses / "hosted.patch")
     shutil.copy2(exe, STAGE / "filee-rust.exe")
+    # Self-update (core::self_update): this build's version, and the public key releases must be signed with.
+    (STAGE / "version.txt").write_text(app_ver + "\n", encoding="utf-8")
+    if PUBLIC_KEY.exists():
+        shutil.copy2(PUBLIC_KEY, STAGE / "update.pub")
+    else:
+        print("note: no packaging/update.pub (uv run 工具/publish.py new-key): this build will not update itself")
     (STAGE / "README.txt").write_text(
         f"Filee Rust for Filee {tag}\r\n\r\n"
         "filee-rust.exe runs in the tray: Ctrl+drag files in Explorer for the donut, Ctrl+Alt+Space for the\r\n"
         "selected files, right-click > Convert with Filee. Settings and tools open upstream Filee on demand.\r\n"
         "Conversions run in app\\filee-cli.exe. Data: %APPDATA%\\Filee (shared with upstream Filee).\r\n"
         "Office documents go to Microsoft Office first when it converts on this PC, else to LibreOffice.\r\n"
+        "Filee Rust updates itself from its GitHub releases (signed; tray > Check for updates; the tray menu shows\r\n"
+        "this machine's id). Off: {\"autoUpdate\": false} in %LOCALAPPDATA%\\FileeLite\\lite.json.\r\n"
         "The downloaded engines and 7-Zip are updated weekly in the background (logs: %LOCALAPPDATA%\\FileeLite).\r\n\r\n"
         "Filee is MIT licensed by Filee contributors; app\\Filee.dll and app\\Filee.Engines.dll are built from its source with\r\n"
         "licenses\\hosted.patch applied. Third-party notices: licenses\\.\r\n",
@@ -244,7 +253,7 @@ def main() -> int:
         exe = SHELL / "target" / "release" / "filee-rust.exe"
 
         step("5 stage")
-        stage(tag, portable, exe)
+        stage(tag, portable, exe, app_ver)
         print(f"staged {sum(1 for _ in STAGE.rglob('*') if _.is_file())} files")
 
         step("7 checks")

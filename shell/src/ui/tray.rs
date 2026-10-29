@@ -1,4 +1,5 @@
-//! System tray icon and its menu (spec 03 §3): left click opens settings, right click shows Open / Pause / Quit.
+//! System tray icon and its menu (spec 03 §3): left click opens settings, right click shows Open / Pause / Quit,
+//! plus Filee Rust's own "check for updates" and this machine's id (click copies it; core::self_update).
 //! The icon is upstream's `filee.ico`, built in; the tooltip tells the drag gesture or that triggers are paused.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
@@ -8,7 +9,8 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -22,6 +24,8 @@ const ICON_ID: u32 = 1;
 const CMD_OPEN: usize = 1001;
 const CMD_PAUSE: usize = 1002;
 const CMD_QUIT: usize = 1003;
+const CMD_CHECK_UPDATE: usize = 1004;
+const CMD_COPY_ID: usize = 1005;
 
 static ICON_FILE: &[u8] = include_bytes!("../../assets/filee.ico");
 
@@ -100,6 +104,22 @@ pub fn handle_message(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> b
                 events::post(AppEvent::Quit);
                 true
             }
+            CMD_CHECK_UPDATE => {
+                crate::core::self_update::check_now();
+                true
+            }
+            CMD_COPY_ID => {
+                use crate::core::self_update as su;
+                let zh = i18n::current().starts_with("zh");
+                let user = std::env::var("USERNAME").unwrap_or_default();
+                let version = su::current_version().unwrap_or_default();
+                let card = su::id_card(&su::machine_id(), &su::computer_name(), &user, &version, zh);
+                if copy_text(&card) {
+                    let done = if zh { "已複製，貼給發佈者即可：" } else { "Copied; paste it to the publisher: " };
+                    balloon("Filee Rust", &format!("{done}\n{card}"));
+                }
+                true
+            }
             _ => false,
         },
         _ => false,
@@ -112,6 +132,11 @@ fn show_menu(hwnd: HWND) {
         let pause_key = if PAUSED.load(Ordering::SeqCst) { "tray.resume" } else { "tray.pause" };
         append(menu, CMD_OPEN, &i18n::t("tray.open"));
         append(menu, CMD_PAUSE, &i18n::t(pause_key));
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        let zh = i18n::current().starts_with("zh");
+        append(menu, CMD_CHECK_UPDATE, if zh { "檢查更新" } else { "Check for updates" });
+        use crate::core::self_update as su;
+        append(menu, CMD_COPY_ID, &su::menu_label(&su::machine_id(), &su::computer_name(), zh));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         append(menu, CMD_QUIT, &i18n::t("tray.quit"));
 
@@ -155,6 +180,56 @@ fn notify(message: NOTIFY_ICON_MESSAGE) -> bool {
 }
 
 use windows::Win32::UI::Shell::NOTIFY_ICON_MESSAGE;
+
+/// A Windows notification from the tray icon (Windows 10/11 show it as a toast).
+pub fn balloon(title: &str, text: &str) {
+    if !ADDED.load(Ordering::SeqCst) {
+        return;
+    }
+    let mut data = NOTIFYICONDATAW {
+        cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: HWND(MAIN.load(Ordering::SeqCst) as *mut _),
+        uID: ICON_ID,
+        uFlags: NIF_INFO,
+        dwInfoFlags: NIIF_INFO,
+        ..Default::default()
+    };
+    for (slot, unit) in data.szInfoTitle.iter_mut().zip(title.encode_utf16().take(63)) {
+        *slot = unit;
+    }
+    for (slot, unit) in data.szInfo.iter_mut().zip(text.encode_utf16().take(255)) {
+        *slot = unit;
+    }
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+}
+
+/// Puts `text` on the clipboard (CF_UNICODETEXT).
+fn copy_text(text: &str) -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    const CF_UNICODETEXT: u32 = 13;
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2) else { return false };
+        let ptr = GlobalLock(mem) as *mut u16;
+        if ptr.is_null() {
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+        let _ = GlobalUnlock(mem);
+        let hwnd = HWND(MAIN.load(Ordering::SeqCst) as *mut _);
+        if OpenClipboard(Some(hwnd)).is_err() {
+            return false;
+        }
+        let _ = EmptyClipboard();
+        let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(mem.0))).is_ok();
+        let _ = CloseClipboard();
+        ok
+    }
+}
 
 /// "Filee: hold Ctrl and drag files", or that the shortcuts are paused.
 fn tooltip(paused: bool, settings: &Value) -> String {

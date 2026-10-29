@@ -15,6 +15,7 @@
 //! helpers).
 
 pub mod engine_update;
+pub mod self_update;
 pub mod formats;
 pub mod history;
 pub mod hosted;

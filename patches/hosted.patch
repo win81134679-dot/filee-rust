@@ -118,7 +118,7 @@ index 5d55510..5450c8b 100644
    "profile.images": "圖片",
    "profile.pdf": "PDF",
 diff --git a/src/Filee.App/Program.cs b/src/Filee.App/Program.cs
-index 50e1fde..721be1c 100644
+index 50e1fde..8c0ace9 100644
 --- a/src/Filee.App/Program.cs
 +++ b/src/Filee.App/Program.cs
 @@ -11,6 +11,7 @@
@@ -129,7 +129,7 @@ index 50e1fde..721be1c 100644
  using Filee.Core.Platform;
  using Filee.Core.Settings;
  using Microsoft.Extensions.Logging;
-@@ -51,6 +52,10 @@ public static int Main(string[] args)
+@@ -51,6 +52,12 @@ public static int Main(string[] args)
          PreloadedStore = null;
          Log = StartupDiagnostics.CreateEarlyLogger(Path.Combine(UserDataStore.DefaultDirectory, "logs"), out var earlyStoreLogger);
          StartupDiagnostics.LogUnhandledExceptions(Log);
@@ -137,23 +137,16 @@ index 50e1fde..721be1c 100644
 +            return FileeRustEngineUpdate.Run(updateEngines, Log);
 +        if (Options.Hosted && Options.SeedData) // Filee Rust: first run on a new computer, no window and no lock
 +            return FileeRustSeedData.Run(Log);
++        if (Options.Hosted && Options.SelfUpdate) // Filee Rust: its own update (check, download, verify), no window
++            return FileeRustSelfUpdate.Run(Log);
          Elevation = Filee.Platform.Windows.Elevation.Probe();
          var startup = StartupDiagnostics.Describe(UpdateService.CurrentVersion, Environment.ProcessPath,
              StartupDiagnostics.InstallKind(UpdateService.IsInstalled, UpdateService.IsReleaseBuild), Elevation,
-@@ -307,3 +312,205 @@ public static AppBuilder BuildAvaloniaApp()
+@@ -307,3 +314,402 @@ public static AppBuilder BuildAvaloniaApp()
  internal sealed class FileeFontCollection() : Avalonia.Media.Fonts.EmbeddedFontCollection(
      new Uri("fonts:Filee", UriKind.Absolute),
      new Uri("avares://Filee/Assets/Fonts", UriKind.Absolute));
 +
-+/// <summary>
-+/// Filee Rust (<c>Filee.exe --hosted --update-engines[=ids]</c>, started weekly by filee-rust.exe, no window): brings
-+/// the engines Filee downloaded, and the 7-Zip next to Filee.exe, up to the newest pinned version. The pins are this
-+/// build's engines.json, or the latest Filee release's where that one is newer and comes from the same publisher (same
-+/// host; same owner/repo on github.com, same channel on conda.anaconda.org). Every download is SHA-256 checked by
-+/// EngineInstaller as usual. Packages in <c>ids</c> are installed when missing. Exit code 0 = up to date, 1 = a
-+/// package failed (filee-rust.exe tries again the next day). One line per package on standard output.
-+/// FILEE_LITE_ENGINES_DIR (tests) puts both engine folders there.
-+/// </summary>
 +/// <summary>
 +/// Filee Rust: upstream keeps its built-in library in memory until something is saved, so on a computer where Filee
 +/// never ran there is no presets.json / profiles.json and filee-rust.exe (which reads the files) would show an empty
@@ -185,6 +178,212 @@ index 50e1fde..721be1c 100644
 +    }
 +}
 +
++/// <summary>
++/// Filee Rust (<c>Filee.exe --hosted --self-update</c>, started by filee-rust.exe once a day or from its tray, no
++/// window): finds the newest release of Filee Rust that is newer than this one and meant for this machine, downloads
++/// its installer (resuming a partial download) and checks it. Every release carries <c>update.json</c> (version,
++/// installer name, size, SHA-256, optional list of machine ids) and <c>update.sig</c> (ECDSA P-256 / SHA-256 over the
++/// exact bytes of update.json, DER, base64), signed with the publisher's key; the public key ships with filee-rust.exe.
++/// Nothing unsigned, older or meant for other machines is taken. Inputs (environment): FILEE_RUST_UPDATE_REPO
++/// (owner/repo), FILEE_RUST_CURRENT (version), FILEE_RUST_MACHINE (this machine's id), FILEE_RUST_UPDATE_KEY (public
++/// key PEM file), FILEE_RUST_UPDATE_DIR (download folder); FILEE_RUST_UPDATE_API (tests: another API base, may be http).
++/// Output, one line each: <c>current &lt;v&gt;</c> | <c>available &lt;v&gt;</c> | <c>progress &lt;done&gt; &lt;total&gt;</c> |
++/// <c>ready &lt;v&gt; &lt;path&gt;</c> | <c>failed &lt;reason&gt;</c>. Exit code 0 = current or ready, 1 = failed.
++/// </summary>
++internal static class FileeRustSelfUpdate
++{
++    private static readonly System.Text.RegularExpressions.Regex VersionPattern =
++        new(@"^(\d+)\.(\d+)\.(\d+)-(?:rust|lite)\.(\d+)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
++
++    public static int Run(ILogger log)
++    {
++        try
++        {
++            return RunAsync(log).GetAwaiter().GetResult();
++        }
++        catch (Exception ex)
++        {
++            log.LogWarning(ex, "Filee Rust self-update failed");
++            Console.WriteLine($"failed {ex.Message}");
++            return 1;
++        }
++    }
++
++    /// <summary>Version as (upstream major, minor, patch, Filee Rust revision); null when it is not one.</summary>
++    internal static int[]? ParseVersion(string? text)
++    {
++        var m = VersionPattern.Match((text ?? "").Trim());
++        return m.Success ? [.. m.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).Select(g => int.Parse(g.Value))] : null;
++    }
++
++    internal static int Compare(int[] a, int[] b)
++    {
++        for (var i = 0; i < 4; i++)
++            if (a[i] != b[i])
++                return a[i].CompareTo(b[i]);
++        return 0;
++    }
++
++    internal static bool Verify(byte[] manifest, string signatureBase64, string publicKeyPem)
++    {
++        using var key = System.Security.Cryptography.ECDsa.Create();
++        key.ImportFromPem(publicKeyPem);
++        byte[] signature;
++        try
++        {
++            signature = Convert.FromBase64String(signatureBase64.Trim());
++        }
++        catch (FormatException)
++        {
++            return false;
++        }
++        return key.VerifyData(manifest, signature, System.Security.Cryptography.HashAlgorithmName.SHA256,
++            System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence);
++    }
++
++    private static string Need(string name) =>
++        Environment.GetEnvironmentVariable(name) is { Length: > 0 } v ? v : throw new InvalidOperationException(name + " is not set");
++
++    private static async Task<int> RunAsync(ILogger log)
++    {
++        var repo = Need("FILEE_RUST_UPDATE_REPO");
++        var current = ParseVersion(Need("FILEE_RUST_CURRENT")) ?? throw new InvalidOperationException("FILEE_RUST_CURRENT is not a version");
++        var machine = Need("FILEE_RUST_MACHINE").Trim();
++        var publicKey = await File.ReadAllTextAsync(Need("FILEE_RUST_UPDATE_KEY"));
++        var folder = Need("FILEE_RUST_UPDATE_DIR");
++        var api = Environment.GetEnvironmentVariable("FILEE_RUST_UPDATE_API") is { Length: > 0 } a ? a.TrimEnd('/') : "https://api.github.com";
++        var testing = api != "https://api.github.com";
++        Directory.CreateDirectory(folder);
++
++        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
++        http.DefaultRequestHeaders.UserAgent.ParseAdd($"FileeRust/{string.Join('.', current)}");
++        http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
++
++        using var releases = System.Text.Json.JsonDocument.Parse(await http.GetStringAsync($"{api}/repos/{repo}/releases?per_page=10"));
++        (int[] Version, string Text, string Installer, long Size, string Sha256, string Url)? best = null;
++        foreach (var release in releases.RootElement.EnumerateArray())
++        {
++            if (release.TryGetProperty("draft", out var draft) && draft.GetBoolean())
++                continue;
++            string? Asset(string name) => release.GetProperty("assets").EnumerateArray()
++                .Where(x => x.GetProperty("name").GetString() == name)
++                .Select(x => x.GetProperty("browser_download_url").GetString()).FirstOrDefault();
++            if (Asset("update.json") is not { } manifestUrl || Asset("update.sig") is not { } sigUrl)
++                continue;
++            var manifest = await http.GetByteArrayAsync(Checked(manifestUrl, testing));
++            var signature = await http.GetStringAsync(Checked(sigUrl, testing));
++            var tag = release.GetProperty("tag_name").GetString();
++            if (!Verify(manifest, signature, publicKey))
++            {
++                log.LogWarning("Filee Rust self-update: {Tag} has a bad signature; ignored", tag);
++                Console.WriteLine($"bad-signature {tag}");
++                continue;
++            }
++            using var doc = System.Text.Json.JsonDocument.Parse(manifest);
++            var root = doc.RootElement;
++            var text = root.GetProperty("version").GetString() ?? "";
++            if (ParseVersion(text) is not { } version || Compare(version, current) <= 0)
++                continue;
++            if (root.TryGetProperty("machines", out var machines) && machines.ValueKind == System.Text.Json.JsonValueKind.Array
++                && !machines.EnumerateArray().Any(m => string.Equals(m.GetString(), machine, StringComparison.OrdinalIgnoreCase)))
++            {
++                Console.WriteLine($"not-for-this-machine {text}");
++                continue;
++            }
++            var installer = Path.GetFileName(root.GetProperty("file").GetString() ?? "");
++            if (installer.Length == 0 || Asset(installer) is not { } installerUrl)
++                continue;
++            if (best is null || Compare(version, best.Value.Version) > 0)
++                best = (version, text, installer, root.GetProperty("size").GetInt64(), root.GetProperty("sha256").GetString() ?? "", installerUrl);
++        }
++        if (best is not { } b)
++        {
++            Console.WriteLine($"current {string.Join('.', current[..3])}-rust.{current[3]}");
++            return 0;
++        }
++        Console.WriteLine($"available {b.Text}");
++        foreach (var stale in Directory.EnumerateFiles(folder))
++            if (!Path.GetFileName(stale).StartsWith(b.Installer, StringComparison.OrdinalIgnoreCase))
++                File.Delete(stale);
++
++        var target = Path.Combine(folder, b.Installer);
++        var part = target + ".part";
++        if (File.Exists(target) && new FileInfo(target).Length == b.Size && Sha256Of(target) == b.Sha256.ToLowerInvariant())
++        {
++            Console.WriteLine($"ready {b.Text} {target}");
++            return 0;
++        }
++        File.Delete(target);
++        if (File.Exists(part) && new FileInfo(part).Length > b.Size)
++            File.Delete(part);
++        await Download(http, Checked(b.Url, testing), part, b.Size);
++        if (new FileInfo(part).Length != b.Size || Sha256Of(part) != b.Sha256.ToLowerInvariant())
++        {
++            File.Delete(part);
++            Console.WriteLine("failed the download does not match update.json");
++            return 1;
++        }
++        File.Move(part, target);
++        log.LogInformation("Filee Rust self-update: {Version} downloaded to {Path}", b.Text, target);
++        Console.WriteLine($"ready {b.Text} {target}");
++        return 0;
++    }
++
++    private static string Checked(string url, bool testing) =>
++        url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || testing ? url : throw new InvalidOperationException("not https: " + url);
++
++    private static string Sha256Of(string path)
++    {
++        using var stream = File.OpenRead(path);
++        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
++    }
++
++    /// <summary>Appends to <paramref name="part"/> from where it stopped (HTTP Range), printing progress.</summary>
++    private static async Task Download(HttpClient http, string url, string part, long size)
++    {
++        var have = File.Exists(part) ? new FileInfo(part).Length : 0;
++        if (have == size)
++            return;
++        using var request = new HttpRequestMessage(HttpMethod.Get, url);
++        request.Headers.Accept.Clear();
++        request.Headers.Accept.ParseAdd("application/octet-stream");
++        if (have > 0)
++            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(have, null);
++        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
++        response.EnsureSuccessStatusCode();
++        if (have > 0 && response.StatusCode != System.Net.HttpStatusCode.PartialContent)
++            have = 0; // the server sent the whole file
++        await using var body = await response.Content.ReadAsStreamAsync();
++        await using var file = new FileStream(part, have > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write);
++        var buffer = new byte[81920];
++        var lastShown = -1L;
++        while (true)
++        {
++            using var idle = new CancellationTokenSource(TimeSpan.FromSeconds(60));
++            var read = await body.ReadAsync(buffer, idle.Token);
++            if (read == 0)
++                break;
++            await file.WriteAsync(buffer.AsMemory(0, read));
++            have += read;
++            var step = have * 20 / Math.Max(size, 1);
++            if (step != lastShown)
++            {
++                lastShown = step;
++                Console.WriteLine($"progress {have} {size}");
++            }
++        }
++    }
++}
++
++/// <summary>
++/// Filee Rust (<c>Filee.exe --hosted --update-engines[=ids]</c>, started weekly by filee-rust.exe, no window): brings
++/// the engines Filee downloaded, and the 7-Zip next to Filee.exe, up to the newest pinned version. The pins are this
++/// build's engines.json, or the latest Filee release's where that one is newer and comes from the same publisher (same
++/// host; same owner/repo on github.com, same channel on conda.anaconda.org). Every download is SHA-256 checked by
++/// EngineInstaller as usual. Packages in <c>ids</c> are installed when missing. Exit code 0 = up to date, 1 = a
++/// package failed (filee-rust.exe tries again the next day). One line per package on standard output.
++/// FILEE_LITE_ENGINES_DIR (tests) puts both engine folders there.
++/// </summary>
 +internal static class FileeRustEngineUpdate
 +{
 +    private const string LatestRelease = "https://api.github.com/repos/KnifeLemon/Filee/releases/latest";
@@ -347,10 +546,10 @@ index 50e1fde..721be1c 100644
 +    }
 +}
 diff --git a/src/Filee.App/Services/CommandLine.cs b/src/Filee.App/Services/CommandLine.cs
-index eb17faa..234a4a4 100644
+index eb17faa..e6eb157 100644
 --- a/src/Filee.App/Services/CommandLine.cs
 +++ b/src/Filee.App/Services/CommandLine.cs
-@@ -41,8 +41,20 @@ public sealed record CommandLine(
+@@ -41,8 +41,23 @@ public sealed record CommandLine(
      bool? ContextMenu = null,
      string? Language = null,
      bool WhatsNew = false,
@@ -359,7 +558,8 @@ index eb17faa..234a4a4 100644
 +    bool Hosted = false,
 +    string? RunPreset = null,
 +    IReadOnlyList<string>? UpdateEngines = null,
-+    bool SeedData = false)
++    bool SeedData = false,
++    bool SelfUpdate = false)
  {
 +    // Filee Rust (patches/hosted.patch):
 +    //   Filee.exe --hosted ...             started by filee-rust.exe: no tray, no global hook, no watch folders, no
@@ -369,10 +569,12 @@ index eb17faa..234a4a4 100644
 +    //                                      filee-rust.exe); the listed packages are installed when missing
 +    //   Filee.exe --hosted --seed-data     write the built-in presets.json / profiles.json when they are missing
 +    //                                      (a computer where Filee never ran), then exit without a window
++    //   Filee.exe --hosted --self-update   Filee Rust's own update: find a newer signed release, download and
++    //                                      verify it (inputs in FILEE_RUST_* variables), no window
      /// <summary>File name prefix of list files written by FileeExplorerMenu.dll (LIST_PREFIX there) into %TEMP%.</summary>
      public const string ListFilePrefix = "Filee-convert-";
  
-@@ -62,6 +74,10 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+@@ -62,6 +77,11 @@ public static CommandLine Parse(IReadOnlyList<string> args)
          string? language = null;
          var whatsNew = false;
          string? updatedFrom = null;
@@ -380,10 +582,11 @@ index eb17faa..234a4a4 100644
 +        string? runPreset = null;
 +        List<string>? updateEngines = null;
 +        var seedData = false;
++        var selfUpdate = false;
  
          foreach (var arg in args)
          {
-@@ -110,6 +126,20 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+@@ -110,6 +130,23 @@ public static CommandLine Parse(IReadOnlyList<string> args)
                  case "--convert-list":
                      expectList = true;
                      break;
@@ -397,6 +600,9 @@ index eb17faa..234a4a4 100644
 +                case "--seed-data":
 +                    seedData = true;
 +                    break;
++                case "--self-update":
++                    selfUpdate = true;
++                    break;
 +                case "--run" when !string.IsNullOrWhiteSpace(value):
 +                    runPreset = value.Trim();
 +                    collecting = true;
@@ -404,13 +610,13 @@ index eb17faa..234a4a4 100644
                  default:
                      // Ignore anything unknown that isn't a file (e.g. options of a newer version).
                      if (collecting && !arg.StartsWith("--", StringComparison.Ordinal) && Exists(arg))
-@@ -117,7 +147,8 @@ public static CommandLine Parse(IReadOnlyList<string> args)
+@@ -117,7 +154,8 @@ public static CommandLine Parse(IReadOnlyList<string> args)
                      break;
              }
          }
 -        return new CommandLine(background, settings, files, listFile, quit, cleanup, engines, startWithWindows, contextMenu, language, whatsNew, updatedFrom);
 +        return new CommandLine(background, settings, files, listFile, quit, cleanup, engines, startWithWindows, contextMenu, language, whatsNew, updatedFrom,
-+            hosted, runPreset, updateEngines, seedData);
++            hosted, runPreset, updateEngines, seedData, selfUpdate);
      }
  
      /// <summary>"--Name=Value" → ("--name", "Value"); "--name" → ("--name", null).</summary>

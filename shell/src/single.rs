@@ -2,9 +2,11 @@
 //! main window with `WM_COPYDATA` (UTF-16, NUL-separated) and exit.
 
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HANDLE, LPARAM, WPARAM};
+use std::sync::atomic::{AtomicIsize, Ordering};
+
+use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, LPARAM, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_COPYDATA};
 
 /// Marks our WM_COPYDATA ("FLit").
@@ -15,13 +17,38 @@ pub struct Instance {
     _mutex: HANDLE,
 }
 
+/// The lock of the first instance (0 = not held), so [`release`] can let go of it.
+static HELD: AtomicIsize = AtomicIsize::new(0);
+
 pub fn acquire() -> Instance {
     let user = std::env::var("USERNAME").unwrap_or_default();
     let name = HSTRING::from(format!("Local\\FileeLite-{user}"));
     unsafe {
         let mutex = CreateMutexW(None, true, &name).unwrap_or_default();
         let is_first = GetLastError() != ERROR_ALREADY_EXISTS;
+        if is_first {
+            HELD.store(mutex.0 as isize, Ordering::SeqCst);
+        }
         Instance { is_first, _mutex: mutex }
+    }
+}
+
+/// Lets go of the lock (the self-update: Setup waits for it to be free). The process ends right after.
+pub fn release() {
+    let held = HELD.swap(0, Ordering::SeqCst);
+    if held != 0 {
+        unsafe {
+            let handle = HANDLE(held as *mut _);
+            let _ = ReleaseMutex(handle);
+            let _ = CloseHandle(handle);
+        }
+    }
+}
+
+/// Takes the lock again after [`release`] when Setup could not be started.
+pub fn reacquire() {
+    if HELD.load(Ordering::SeqCst) == 0 {
+        std::mem::forget(acquire());
     }
 }
 

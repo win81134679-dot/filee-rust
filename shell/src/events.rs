@@ -25,6 +25,10 @@ pub enum AppEvent {
     DataChanged,
     /// Show upstream's settings window.
     OpenSettings,
+    /// A tray notification (title, text): the answers of a manual update check.
+    Notice(String, String),
+    /// A manual update check downloaded this version: install it (core::self_update).
+    InstallUpdate(String),
     Quit,
 }
 

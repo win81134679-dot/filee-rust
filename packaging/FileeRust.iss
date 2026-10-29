@@ -108,6 +108,9 @@ Source: "{#Stage}\i18n\*"; DestDir: "{app}\i18n"; Flags: ignoreversion
 Source: "{#Stage}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "{#Stage}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#Stage}\filee.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Self-update (shell\src\core\self_update.rs): this build's version and the key its releases are signed with.
+Source: "{#Stage}\version.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\update.pub"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\Filee Rust"; Filename: "{app}\filee-rust.exe"; Parameters: "--settings"; IconFilename: "{app}\filee.ico"
@@ -198,6 +201,30 @@ end;
 function WantsEngines(): Boolean;
 begin
   Result := EngineList('') <> '';
+end;
+
+// Filee Rust runs this Setup silently with /SELFUPDATE=1 after letting go of its lock and quitting
+// (core::self_update). Setup starts it again at the very end, whether the install worked or not, so a failed
+// update never leaves the machine without Filee Rust until the next sign-in.
+function IsSelfUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:SELFUPDATE|0}') = '1';
+end;
+
+procedure DeinitializeSetup();
+var
+  Exe: String;
+  Code: Integer;
+begin
+  if not IsSelfUpdate() then
+    exit;
+  try
+    Exe := ExpandConstant('{app}\filee-rust.exe');
+  except
+    exit; // Setup stopped before it knew the folder
+  end;
+  if FileExists(Exe) then
+    Exec(Exe, '--background', '', SW_HIDE, ewNoWait, Code);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

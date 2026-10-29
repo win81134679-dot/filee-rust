@@ -124,6 +124,7 @@ fn main() {
     info!("Filee Rust {} starting; app {}", env!("CARGO_PKG_VERSION"), paths::app_dir().display());
 
     core::store::load();
+    core::self_update::startup();
     let settings = core::store::settings();
     ui::i18n::init(settings.get("language").and_then(|v| v.as_str()).unwrap_or("auto"));
     let palette = ui::theme::palette(&settings);
@@ -251,7 +252,9 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_ENGINES => {
-            core::engine_update::tick(core::jobs::is_busy() || core::hosted::is_running());
+            let busy = core::jobs::is_busy() || core::hosted::is_running();
+            core::engine_update::tick(busy);
+            core::self_update::tick(busy);
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == TIMER_DATA => {
@@ -322,6 +325,10 @@ fn handle_event(event: AppEvent) {
             apply_settings(&settings);
         }
         AppEvent::OpenSettings => core::hosted::open_settings(),
+        AppEvent::Notice(title, text) => ui::tray::balloon(&title, &text),
+        AppEvent::InstallUpdate(version) => {
+            core::self_update::install_requested(&version, core::jobs::is_busy() || core::hosted::is_running())
+        }
         AppEvent::Quit => unsafe { PostQuitMessage(0) },
     }
 }
